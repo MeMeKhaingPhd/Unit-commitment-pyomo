@@ -6,17 +6,17 @@ This project implements a single-node Unit Commitment (UC) optimization model us
 
 The current implementation uses a small example dataset (3 generators, 10 time periods) for demonstration and to manage solver limitations with size-restricted licenses.
 
-## Key Model Features
+#Key Model Features
 
 The model incorporates essential aspects of unit commitment:
 
-1.  **Objective Function:**
+1.  Objective Function:
     *   Minimizes the total operational cost, which includes:
-        *   **Startup Costs:** A fixed cost incurred each time a unit is started.
-        *   **No-Load Costs:** The cost of keeping a unit online, even if it's producing no power.
-        *   **Generation Costs:** A quadratic cost function (`a*g + b*g^2`) representing the variable fuel cost based on the amount of power (`g`) generated.
+        *   Startup Costs: A fixed cost incurred each time a unit is started.
+        *   No-Load Costs: The cost of keeping a unit online, even if it's producing no power.
+        *   Generation Costs: A quadratic cost function (`a*g + b*g^2`) representing the variable fuel cost based on the amount of power (`g`) generated.
 
-2.  **Generator Operational Constraints:**
+2.  Generator Operational Constraints
     *   **On/Off Status Logic:** Uses binary variables (`z`, `y`, `x`) to track if a unit is on/off (`z`), starting up (`y`), or shutting down (`x`) in each time period. Ensures a unit cannot be started and shut down simultaneously.
     *   **Minimum Up-Time:** Once a unit is started, it must remain online for a specified minimum number of consecutive time periods.
     *   **Minimum Down-Time:** After a unit is shut down, it must remain offline for a specified minimum duration.
