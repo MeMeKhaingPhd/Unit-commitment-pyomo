@@ -82,7 +82,7 @@ The provided script includes a small, illustrative 3-bus system with 3 generator
 *   Consideration of generator ramp-up/down costs or shutdown costs.
 *   Stochastic unit commitment to handle uncertainties (e.g., in renewable generation or demand).
 *   Security constraints (N-1 contingency analysis).
-*   Reading data from external files (e.g., MATPOWER case files, CSVs).
+*   Reading data from external files like CSVs.
 
 ## Acknowledgements
 
