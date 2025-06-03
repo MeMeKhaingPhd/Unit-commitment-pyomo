@@ -1,6 +1,6 @@
 import pyomo.environ as pyo
-
-# --- Model Data ---
+#this is MIQP like objective funciton is quadratic and constraints are linear
+# Model Data 
 # Number of time periods
 T =10 # I tested 10 if I test 24 hrs due to Gurobi license it is some restrictions, I will be done in Data center access very soon beccause I have data center GPU access in institute
 

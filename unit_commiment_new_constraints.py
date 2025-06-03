@@ -1,5 +1,5 @@
 import pyomo.environ as pyo
-
+#this is for all constraints according to paper
 # Model Data 
 # Number of time periods
 T = 24 
