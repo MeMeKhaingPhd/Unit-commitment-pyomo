@@ -1,8 +1,8 @@
 import pyomo.environ as pyo
 
-# --- Model Data ---
+# Model Data 
 # Number of time periods
-T = 24 # e.g., 24 hours
+T = 24 
 
 # Generator Data
 generators_data = [
@@ -31,14 +31,14 @@ demand_data = [
 if len(demand_data) != T:
     raise ValueError(f"Demand data length ({len(demand_data)}) must match T ({T})")
 
-# --- Pyomo Model ---
+# Pyomo Model
 model = pyo.ConcreteModel(name="UnitCommitment_Ramp")
 
-# --- Sets ---
+# Sets 
 model.I_set = pyo.Set(initialize=[gen['id'] for gen in generators_data])
 model.T_set = pyo.RangeSet(1, T) # 1-based indexing for time periods
 
-# --- Parameters ---
+# Parameters
 model.Pmin = pyo.Param(model.I_set, initialize={gen['id']: gen['Pmin'] for gen in generators_data})
 model.Pmax = pyo.Param(model.I_set, initialize={gen['id']: gen['Pmax'] for gen in generators_data})
 model.Cost_Startup = pyo.Param(model.I_set, initialize={gen['id']: gen['Cost_Startup'] for gen in generators_data})
@@ -56,13 +56,13 @@ model.RampUpRate = pyo.Param(model.I_set, initialize={gen['id']: gen['RampUpRate
 model.RampDownRate = pyo.Param(model.I_set, initialize={gen['id']: gen['RampDownRate'] for gen in generators_data})
 model.Initial_Generation = pyo.Param(model.I_set, initialize={gen['id']: gen['Initial_Generation'] for gen in generators_data})
 
-# --- Decision Variables ---
+# Decision Variables
 model.z = pyo.Var(model.I_set, model.T_set, domain=pyo.Binary) # On/Off
 model.y = pyo.Var(model.I_set, model.T_set, domain=pyo.Binary) # Startup
 model.x = pyo.Var(model.I_set, model.T_set, domain=pyo.Binary) # Shutdown
 model.g = pyo.Var(model.I_set, model.T_set, domain=pyo.NonNegativeReals) # Generation
 
-# --- Objective Function ---
+# Objective Function : linear
 def total_cost_rule(m):
     startup_c = sum(m.Cost_Startup[i] * m.y[i,t] for i in m.I_set for t in m.T_set)
     noload_c = sum(m.Cost_NoLoad[i] * m.z[i,t] for i in m.I_set for t in m.T_set)
@@ -70,7 +70,7 @@ def total_cost_rule(m):
     return startup_c + noload_c + gen_c
 model.TotalCost = pyo.Objective(rule=total_cost_rule, sense=pyo.minimize)
 
-# --- Constraints ---
+# Constraints
 
 # 1. Generator ON/OFF Logic (Status, Startup, Shutdown)
 model.StatusLogic = pyo.ConstraintList()
@@ -121,7 +121,7 @@ for i in model.I_set:
 model.DemandBalance = pyo.ConstraintList()
 for t in model.T_set:
     model.DemandBalance.add(sum(model.g[i,t] for i in model.I_set) >= model.Demand[t])
-
+# my notes
 # 6. Ramp Constraints (Equation Set 7)
 # Ramp limits are typically applied when the unit is ON in both t and t-1.
 # More advanced formulations handle ramping up from zero (startup ramp) and ramping down to zero (shutdown ramp)
@@ -160,13 +160,13 @@ for i in model.I_set:
             model.RampConstraints.add(model.g[i,t-1] - model.g[i,t] <= model.RampDownRate[i])
 
 
-# --- Solve the Model using Gurobi ---
+# Solve the Model using Gurobi
 solver = pyo.SolverFactory('gurobi')
 # solver.options['MIPGap'] = 0.01
 # solver.options['TimeLimit'] = 300
 results = solver.solve(model, tee=True)
 
-# --- Display Results ---
+# Display Results
 if (results.solver.status == pyo.SolverStatus.ok) and \
    (results.solver.termination_condition == pyo.TerminationCondition.optimal):
     print("\n--- Optimal Solution Found (using Gurobi) ---")
