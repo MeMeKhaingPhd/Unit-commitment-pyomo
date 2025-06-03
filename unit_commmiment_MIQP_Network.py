@@ -1,10 +1,10 @@
 import pyomo.environ as pyo
 
-# --- Model Configuration & Data ---
-T = 4 # Number of time periods (reduced for quick testing)
+# Model Configuration & Data 
+T = 4 # I reduced for quick testing
 BaseMVA = 100.0 # System Base MVA for per-unit calculations
 
-# --- Network Data (Illustrative 3-bus system) ---
+# Network Data , I test just for 3 bus
 nodes_data = {
     "Bus1": {"is_reference": True},
     "Bus2": {},
@@ -17,7 +17,7 @@ lines_data = {
     ("Bus2", "Bus3"): {"reactance_pu": 0.05, "capacity_mw": 120},
 }
 
-# --- Generator Data ---
+# Generator Data 
 # Added 'bus' attribute and quadratic cost coefficients
 generators_data = [
     {
@@ -40,7 +40,7 @@ generators_data = [
     }
 ]
 
-# --- Demand Data (Nodal) ---
+# Demand Data (Nodal) 
 # Original total system demand for T periods
 original_total_demand = [100, 110, 105, 100, 120, 150, 180, 220, 250, 260, 270, 280,
                          275, 260, 240, 220, 200, 180, 160, 150, 140, 130, 120, 110]
@@ -55,16 +55,16 @@ nodal_demand_data = { # nodal_demand_data[bus_id][time_period_index]
 if any(len(nodal_demand_data[b]) != T for b in nodal_demand_data):
     raise ValueError("Nodal demand data length must match T")
 
-# --- Pyomo Model ---
+# Pyomo Model 
 model = pyo.ConcreteModel(name="NetworkUnitCommitment")
 
-# --- Sets ---
+# Sets 
 model.I_set = pyo.Set(initialize=[gen['id'] for gen in generators_data])  # Generators
 model.T_set = pyo.RangeSet(1, T)                                          # Time periods
 model.B_nodes = pyo.Set(initialize=nodes_data.keys())                     # Buses/Nodes
 model.L_lines = pyo.Set(initialize=lines_data.keys(), dimen=2)            # Transmission Lines
 
-# --- Parameters ---
+# Parameters 
 # Generator Parameters
 model.Pmin = pyo.Param(model.I_set, initialize={gen['id']: gen['Pmin'] for gen in generators_data})
 model.Pmax = pyo.Param(model.I_set, initialize={gen['id']: gen['Pmax'] for gen in generators_data})
@@ -99,7 +99,7 @@ model.GeneratorsAtBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [i for i 
 model.LinesFromBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [l for l in m.L_lines if m.LineFrom[l] == b])
 model.LinesToBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [l for l in m.L_lines if m.LineTo[l] == b])
 
-# --- Decision Variables ---
+# Decision Variables
 model.z = pyo.Var(model.I_set, model.T_set, domain=pyo.Binary, doc="On/Off status")
 model.y = pyo.Var(model.I_set, model.T_set, domain=pyo.Binary, doc="Startup decision")
 model.x = pyo.Var(model.I_set, model.T_set, domain=pyo.Binary, doc="Shutdown decision")
@@ -108,7 +108,7 @@ model.g = pyo.Var(model.I_set, model.T_set, domain=pyo.NonNegativeReals, doc="Ge
 model.theta = pyo.Var(model.B_nodes, model.T_set, domain=pyo.Reals, doc="Bus voltage angle (radians)")
 model.pline = pyo.Var(model.L_lines, model.T_set, domain=pyo.Reals, doc="Power flow on lines (MW)")
 
-# --- Objective Function ---
+#  Objective Function 
 def total_cost_rule_quadratic(m):
     startup_c = sum(m.Cost_Startup[i] * m.y[i,t] for i in m.I_set for t in m.T_set)
     noload_c = sum(m.Cost_NoLoad[i] * m.z[i,t] for i in m.I_set for t in m.T_set)
@@ -120,7 +120,7 @@ def total_cost_rule_quadratic(m):
     return startup_c + noload_c + gen_c
 model.TotalCost = pyo.Objective(rule=total_cost_rule_quadratic, sense=pyo.minimize)
 
-# --- Constraints ---
+# Constraints 
 
 # 1. Generator ON/OFF Logic
 model.StatusLogic = pyo.ConstraintList()
@@ -178,7 +178,7 @@ for i in model.I_set:
             model.RampConstraints.add(model.g[i,t] - model.g[i,t-1] <= model.RampUpRate[i])
             model.RampConstraints.add(model.g[i,t-1] - model.g[i,t] <= model.RampDownRate[i])
 
-# --- Network Constraints ---
+# Network Constraints 
 
 # 6. Nodal Power Balance
 model.NodalPowerBalance = pyo.ConstraintList()
@@ -229,12 +229,11 @@ for t in model.T_set:
 
 
 # --- Solve the Model ---
-# Ensure you have a solver like Gurobi, CPLEX, or SCIP installed and accessible by Pyomo
-# For SCIP (open-source, good for MIQP): pyo.SolverFactory('scip')
-# For Gurobi: pyo.SolverFactory('gurobi')
-# For CBC (might struggle with MIQP or need reformulation): pyo.SolverFactory('cbc')
+# I used Gurobi and accessible by Pyomo
 
-# Try SCIP if Gurobi license is an issue
+# For Gurobi: pyo.SolverFactory('gurobi')
+
+
 try:
     solver = pyo.SolverFactory('gurobi')
     # solver.options['MIPGap'] = 0.01
@@ -251,7 +250,7 @@ except Exception as e:
 
 results = solver.solve(model, tee=True)
 
-# --- Display Results ---
+# Display Results
 if (results.solver.status == pyo.SolverStatus.ok) and \
    (results.solver.termination_condition == pyo.TerminationCondition.optimal or \
     results.solver.termination_condition == pyo.TerminationCondition.feasible): # SCIP might return feasible for MIQP within gap
@@ -308,6 +307,7 @@ if (results.solver.status == pyo.SolverStatus.ok) and \
 elif results.solver.termination_condition == pyo.TerminationCondition.infeasible:
     print("\n--- Model is Infeasible ---")
     print("Check constraints, especially initial conditions, demand levels, capacities, or ramp rates.")
+    #just for my notes
     # For debugging infeasibility:
     # model.compute_unbounded_rays() # If unbounded
     # model.compute_slack_variables() # If infeasible
@@ -323,4 +323,4 @@ else:
     if hasattr(results.solver, 'message') and results.solver.message:
         print("Solver Message:", results.solver.message)
 
-# model.pprint() # To print the full model structure
+# model.pprint() # this is to print the full model structure like previous
