@@ -27,7 +27,7 @@ Varying Forecast Accuracy (RMSE): The "perfect" solar forecast is degraded with 
 Varying Forecast Bias: A systematic bias is added to the perfect forecast to simulate consistent over- or under-prediction.
 Varying Renewable Penetration: The amount of available solar power is scaled up to simulate a future grid with higher levels of renewables.
 Penetration with Emission Costs: The penetration experiment is repeated with a carbon price to analyze its effect on generator dispatch and total emissions.
-*8Part 4: Visualization:
+*Part 4: Visualization:
 The results from all experiments are collected into pandas DataFrames.
 Matplotlib and Seaborn are used to generate a 2x2 grid of plots, visualizing the outcome of each of the four experiments.
 
