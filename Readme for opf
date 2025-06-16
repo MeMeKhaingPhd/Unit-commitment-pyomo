@@ -1,2 +1,2 @@
-**Solar Forecast Impact on Optimal Power Flow (OPF)**
+#Solar Forecast Impact on Optimal Power Flow (OPF)**
 This code analyzes the impact of solar power forecasting on the economic and physical operation of a power grid. It uses a pipeline that combines a machine learning model (XGBoost) for solar forecasting with a mathematical optimization model (Pyomo) for performing an Optimal Power Flow (OPF).
