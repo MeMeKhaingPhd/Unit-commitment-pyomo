@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-# ADDED: Import the EarlyStopping callback for newer XGBoost versions
-from xgboost.callback import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 import pyomo.environ as pyo
@@ -12,9 +10,9 @@ import warnings
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-# =============================================================================
-# PART 0: DATA CONFIGURATION
-# =============================================================================
+
+# DATA CONFIGURATION
+
 print("--- Part 0: Configuring Data Sources ---")
 
 cleaned_solar_data_file = 'https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-pyomo/refs/heads/main/solar_data_cleaned.csv'
@@ -24,9 +22,9 @@ url_oil_west = 'https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-
 url_oil_central ='https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-pyomo/refs/heads/main/oil-data-central-berlin.csv'
 
 
-# =============================================================================
-# PART 1: XGBOOST FORECASTING MODEL
-# =============================================================================
+
+#  XGBOOST FORECASTING MODEL
+
 print("\n--- Part 1: Training the Solar Forecasting Model ---")
 
 try:
@@ -36,17 +34,15 @@ except Exception as e:
     print(f"\nFATAL ERROR: Could not load solar data from the URL. Error: {e}")
     exit()
 
-# --- Preprocessing using your exact column names ---
-# The target variable is 'X50Hertz..MW.', which we rename for convenience.
-### UPDATED ###
-# This line correctly identifies your target column.
+#  Preprocessing 
+
 df.rename(columns={'X50Hertz..MW.': 'Solar_MW'}, inplace=True)
 
-# This part uses 'Year', 'Month', 'Day', 'Hour', 'Minute' which are correct.
+
 df['Timestamp'] = pd.to_datetime(df[['Year', 'Month', 'Day', 'Hour', 'Minute']])
 df = df.set_index('Timestamp').sort_index()
 
-# Create engineered time-based features
+# Engineered time-based features
 df['hour'] = df.index.hour
 df['dayofyear'] = df.index.dayofyear
 df['month'] = df.index.month
@@ -84,14 +80,14 @@ xgb_reg.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
 rmse = np.sqrt(mean_squared_error(y_test, xgb_reg.predict(X_test)))
 print(f"Base XGBoost Model Trained. Test RMSE on real data: {rmse:.2f} MW")
 
-T_horizon = 24
+T_horizon = 10
 true_solar_generation = y_test.iloc[:T_horizon].values
 print(f"Using a {T_horizon}-hour slice of TRUE solar generation for experiments.\n")
 
 
-# =============================================================================
-# PART 2: ECONOMIC DISPATCH (ED) MODEL DEFINITION
-# =============================================================================
+
+# ECONOMIC DISPATCH (ED) MODEL DEFINITION
+
 print("--- Part 2: Defining the Single-Node Power System and ED Model ---")
 
 try:
@@ -106,9 +102,6 @@ except Exception as e:
     print(f"\nFATAL ERROR: Could not load a data file from its URL. Error: {e}")
     exit()
 
-# MODELING DECISION: Scale up generator capacities to handle the large real demand
-# The original capacities (80-120MW) are too small for a 1500MW demand.
-# This makes the model realistic and feasible.
 capacity_scaling_factor = 10
 generators_data = [
     {"id": "Oil_East", "Pmin": 0, "Pmax": oil_east_data['Capacity (MW)'] * capacity_scaling_factor, "Cost_Gen_Linear": 20, "Cost_Gen_Quadratic": 0.02, "Emission_Rate": 0.25},
@@ -172,9 +165,9 @@ except Exception:
     solver = pyo.SolverFactory('cbc')
 
 
-# =============================================================================
-# PART 3: RUNNING THE TWO-LEVEL SIMULATION
-# =============================================================================
+
+#  RUNNING THE TWO-LEVEL SIMULATION
+
 print("\n--- Part 3: Running Two-Level Simulation Experiments ---")
 
 def run_dispatch_and_get_results(solar_forecast):
@@ -196,14 +189,14 @@ def run_dispatch_and_get_results(solar_forecast):
         'dispatch_df': pd.DataFrame(dispatch)
     }
 
-# --- Experiment 1: Base Case for Visualization ---
+#1: Base Case for Visualization 
 print("\n--- Running Base Case Analysis (Median Forecast) ---")
 # Use a forecast that is close to the true values for a representative case
 base_forecast = true_solar_generation
 base_case_results = run_dispatch_and_get_results(base_forecast)
 
 
-# --- Experiment 2: Impact of Forecast RMSE ---
+# 2: Impact of Forecast RMSE 
 print("\n--- Running Experiment: Impact of Forecast RMSE on Cost ---")
 results_rmse = []
 target_rmses = np.linspace(50, 500, 10) # Using wider RMSE range for real data
@@ -218,19 +211,19 @@ for r in target_rmses:
 df_rmse = pd.DataFrame(results_rmse)
 
 
-# =============================================================================
-# PART 4: VISUALIZATION
-# =============================================================================
+
+# 4: VISUALIZATION
+
 print("\n--- Part 4: Visualizing Results ---")
 sns.set_style("whitegrid")
 plt.figure(figsize=(18, 8))
 
-# --- PLOT 1: Dispatch Stack for the Base Case ---
+# PLOT 1: Dispatch Stack for the Base Case 
 ax1 = plt.subplot(1, 2, 1)
 if base_case_results['status'] == 'optimal':
     dispatch_df = base_case_results['dispatch_df']
     gens = [g['id'] for g in generators_data]
-    colors = ['#FFC300', '#FF5733', '#C70039'] # Colors for Oil generators
+    colors = ['#FFC300', '#FF5733', '#C70039']
     
     # Bottom of the stack is the generator dispatch
     bottom = np.zeros(T_horizon)
@@ -259,7 +252,7 @@ if base_case_results['status'] == 'optimal':
     ax1_twin.set_ylim(bottom=0)
 
 
-# --- PLOT 2: Cost vs. Forecast Error (RMSE) ---
+#  2: Cost vs. Forecast Error (RMSE) 
 ax2 = plt.subplot(1, 2, 2)
 if not df_rmse.empty:
     sns.regplot(x='rmse', y='cost', data=df_rmse, ax=ax2, line_kws={"color": "red"})
