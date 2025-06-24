@@ -236,7 +236,7 @@ if not df_rmse.empty:
     ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax2.grid(True, linestyle='--')
 
-# Cost vs. Forecast Bias (Bottom-Left) 
+# Cost vs. Forecast Bias 
 ax3 = axes[1, 0]
 if not df_bias.empty:
     sns.regplot(x='bias', y='cost', data=df_bias, ax=ax3, order=2, line_kws={"color": "purple"}, scatter_kws={'alpha':0.6})

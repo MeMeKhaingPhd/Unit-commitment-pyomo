@@ -7,7 +7,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 print("--- Starting Solar Data Preprocessing ---")
 
-# The URL for your messy, raw solar data file
+
 url_solar_data = 'https://github.com/MeMeKhaingPhd/Unit-commitment-pyomo/blob/main/solar-reduced-berlin.csv'
 
 # Define the output filename for the clean data
@@ -108,10 +108,10 @@ if len(non_numeric_features) > 0:
     print("Excluding non-numeric columns from features. Consider encoding them.")
 else:
      print("\nAll feature columns used are numeric.")
-# 6. Save the cleaned DataFrame to a new CSV file
+# The cleaned DataFrame to a new CSV file
 try:
     print(f"\nSaving cleaned data to '{output_filename}'...")
-    # We save the index because it contains our important Timestamp
+   
     df.to_csv(output_filename, index=True)
     print(f"Successfully created '{output_filename}'.")
     print(f"Final shape of cleaned data: {df.shape}")

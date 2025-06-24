@@ -12,9 +12,8 @@ import warnings
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-# =============================================================================
-# PART 0: DATA CONFIGURATION
-# =============================================================================
+# DATA CONFIGURATION
+
 print("--- Part 0: Configuring Data Sources ---")
 
 cleaned_solar_data_file = 'https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-pyomo/refs/heads/main/solar_data_cleaned.csv'
@@ -24,9 +23,9 @@ url_oil_west = 'https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-
 url_oil_central ='https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-pyomo/refs/heads/main/oil-data-central-berlin.csv'
 
 
-# =============================================================================
-# PART 1: XGBOOST FORECASTING MODEL
-# =============================================================================
+
+# 1: XGBOOST FORECASTING MODEL
+
 print("\n--- Part 1: Training the Solar Forecasting Model ---")
 
 try:
@@ -36,13 +35,11 @@ except Exception as e:
     print(f"\nFATAL ERROR: Could not load solar data from the URL. Error: {e}")
     exit()
 
-# --- Preprocessing using your exact column names ---
-# The target variable is 'X50Hertz..MW.', which we rename for convenience.
-### UPDATED ###
-# This line correctly identifies your target column.
+# Preprocessing 
+
 df.rename(columns={'X50Hertz..MW.': 'Solar_MW'}, inplace=True)
 
-# This part uses 'Year', 'Month', 'Day', 'Hour', 'Minute' which are correct.
+# This part uses 'Year', 'Month', 'Day', 'Hour', 'Minute' which are correct
 df['Timestamp'] = pd.to_datetime(df[['Year', 'Month', 'Day', 'Hour', 'Minute']])
 df = df.set_index('Timestamp').sort_index()
 
@@ -57,15 +54,13 @@ df.bfill(inplace=True)
 
 target = 'Solar_MW'
 
-### UPDATED ###
-# The feature list is now an exact match of your solardata.csv columns.
-# We exclude the original datetime components and the target itself.
+
 features = [
     'Temperature', 'Clearsky.DHI', 'Clearsky.DNI', 'Clearsky.GHI',
     'Cloud.Type', 'Dew.Point', 'DHI', 'DNI', 'Fill.Flag', 'GHI', 'Ozone',
     'Relative.Humidity', 'Solar.Zenith.Angle', 'Surface.Albedo',
     'Pressure', 'Precipitable.Water', 'Wind.Direction', 'Wind.Speed',
-    # We also include the engineered time features we just created
+   # include the engineered time features we just created
     'hour', 'dayofyear', 'month', 'year', 'dayofweek'
 ]
 # This line of code is robust and will only use the features that exist in the dataframe
@@ -89,10 +84,9 @@ true_solar_generation = y_test.iloc[:T_horizon].values / 10.0
 print(f"NOTE: True solar generation has been scaled down by a factor of 10 to be feasible for the grid.")
 print(f"Using a {T_horizon}-hour slice of true solar generation for experiments.\n")
 
-# =============================================================================
-# PART 2: OPTIMAL POWER FLOW (OPF) MODEL DEFINITION
-# (This part is already correct and needs no changes)
-# =============================================================================
+
+# 2: OPTIMAL POWER FLOW (OPF) MODEL DEFINITION
+
 print("--- Part 2: Defining the Power System and OPF Model from Data URLs ---")
 
 BaseMVA = 100.0
@@ -164,7 +158,7 @@ def create_opf_model(hourly_demand, solar_forecast, emission_params):
     model.GeneratorsAtBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [i for i in m.I_set if m.GenBus[i] == b])
     model.LinesFromBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [l for l in m.L_lines if l[0] == b])
     model.LinesToBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [l for l in m.L_lines if l[1] == b])
-    # The correct line, letting the GenLimits constraint handle the upper bound
+   #The GenLimits constraint handle the upper bound
     model.g = pyo.Var(model.I_set, model.T_set, domain=pyo.NonNegativeReals)
     model.theta = pyo.Var(model.B_nodes, model.T_set, domain=pyo.Reals)
     model.pline = pyo.Var(model.L_lines, model.T_set, domain=pyo.Reals)
@@ -197,10 +191,9 @@ except Exception:
     print("Gurobi not found, falling back to CBC. This may be slow.")
     solver = pyo.SolverFactory('cbc')
 
-# =============================================================================
-# PART 3 & 4: EXPERIMENTS AND VISUALIZATION
-# (These parts are also correct and need no changes)
-# =============================================================================
+
+# 3 & 4: EXPERIMENTS AND VISUALIZATION
+
 print("\n--- Part 3: Running Simulation Experiments ---")
 def get_hourly_demand_at_bus():
     return {bus: [total_demand_profile[t] * nodal_demand_fractions[bus] for t in range(T_horizon)] for bus in nodes_data.keys()}
