@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-# ADDED: Import the EarlyStopping callback for newer XGBoost versions
 from xgboost.callback import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
@@ -12,9 +11,9 @@ import warnings
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-# =============================================================================
-# PART 0: DATA CONFIGURATION
-# =============================================================================
+
+#DATA CONFIGURATION
+
 print("--- Part 0: Configuring Data Sources ---")
 
 cleaned_solar_data_file = 'https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-pyomo/refs/heads/main/solar_data_cleaned.csv'
@@ -24,9 +23,9 @@ url_oil_west = 'https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-
 url_oil_central ='https://raw.githubusercontent.com/MeMeKhaingPhd/Unit-commitment-pyomo/refs/heads/main/oil-data-central-berlin.csv'
 
 
-# =============================================================================
-# PART 1: XGBOOST FORECASTING MODEL
-# =============================================================================
+
+# XGBOOST FORECASTING MODEL
+
 print("\n--- Part 1: Training the Solar Forecasting Model ---")
 
 try:
@@ -36,10 +35,8 @@ except Exception as e:
     print(f"\nFATAL ERROR: Could not load solar data from the URL. Error: {e}")
     exit()
 
-# --- Preprocessing using your exact column names ---
-# The target variable is 'X50Hertz..MW.', which we rename for convenience.
-### UPDATED ###
-# This line correctly identifies your target column.
+#  Preprocessing 
+
 df.rename(columns={'X50Hertz..MW.': 'Solar_MW'}, inplace=True)
 
 # This part uses 'Year', 'Month', 'Day', 'Hour', 'Minute' which are correct.
@@ -87,9 +84,9 @@ true_solar_generation = y_test.iloc[:T_horizon].values
 print(f"Using a {T_horizon}-hour slice of TRUE solar generation for experiments.\n")
 
 
-# =============================================================================
-# PART 2: ECONOMIC DISPATCH (ED) MODEL DEFINITION
-# =============================================================================
+
+#  ECONOMIC DISPATCH (ED) MODEL DEFINITION
+
 print("--- Part 2: Defining the Single-Node Power System and ED Model ---")
 
 try:
@@ -145,9 +142,9 @@ except Exception:
     print("Gurobi not found, falling back to CBC. This may be slow.")
     solver = pyo.SolverFactory('cbc')
 
-# =============================================================================
-# PART 3: RUNNING THE TWO-LEVEL SIMULATION
-# =============================================================================
+
+# RUNNING THE TWO-LEVEL SIMULATION
+
 print("\n--- Part 3: Running Two-Level Simulation Experiments ---")
 
 def run_dispatch_and_get_results(solar_forecast):
@@ -176,11 +173,11 @@ for r in target_rmses:
         print(f"Target RMSE: {r:6.1f} | Actual RMSE: {res['rmse']:6.1f} | Cost: ${res.get('cost', 0):,.0f}")
 df_rmse = pd.DataFrame(results_rmse)
 
-# --- NEW: Experiment 3: Impact of Forecast Bias ---
+#  Experiment Impact of Forecast Bias 
 print("\n--- Running Experiment: Impact of Forecast Bias on Cost ---")
 results_bias = []
 mean_solar = true_solar_generation.mean()
-# Use a reasonable range of bias, e.g., +/- 50% of the average solar generation
+# Use a reasonable range of bias, +/- 50% of the average solar generation
 bias_levels = np.linspace(-0.5 * mean_solar, 0.5 * mean_solar, 11)
 for bias in bias_levels:
     biased_forecast = np.maximum(0, true_solar_generation + bias)
@@ -192,16 +189,16 @@ for bias in bias_levels:
 df_bias = pd.DataFrame(results_bias)
 
 
-# =============================================================================
-# PART 4: VISUALIZATION
-# =============================================================================
+
+# VISUALIZATION
+
 print("\n--- Part 4: Visualizing Results ---")
 sns.set_style("whitegrid")
-# Create a 2x2 subplot grid
+
 fig, axes = plt.subplots(2, 2, figsize=(18, 14))
 fig.suptitle('Two-Level Economic Dispatch Simulation Results', fontsize=18)
 
-# --- PLOT 1: Dispatch Stack for the Base Case (Top-Left) ---
+#Dispatch Stack for the Base Case 
 ax1 = axes[0, 0]
 if base_case_results.get('status') == 'optimal':
     dispatch_df = base_case_results['dispatch_df']
@@ -219,19 +216,17 @@ if base_case_results.get('status') == 'optimal':
     ax1.set_xticks(range(0, T_horizon, 2))
     ax1.grid(True, axis='y', linestyle='--')
     
-    # Create a twin axis for the curtailment plot
     ax1_twin = ax1.twinx()
     ax1_twin.plot(range(T_horizon), dispatch_df['Curtailment'], color='red', linestyle=':', marker='o', markersize=4, label='Curtailment')
     ax1_twin.set_ylabel('Curtailment (MW)', color='red')
     ax1_twin.tick_params(axis='y', labelcolor='red')
     ax1_twin.set_ylim(bottom=0)
 
-    # Combine legends from both axes into one box
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax1_twin.get_legend_handles_labels()
     ax1.legend(lines + lines2, labels + labels2, loc='upper left')
 
-# --- PLOT 2: Cost vs. Forecast Error (RMSE) (Top-Right) ---
+# Cost vs. Forecast Error (RMSE) 
 ax2 = axes[0, 1]
 if not df_rmse.empty:
     sns.regplot(x='rmse', y='cost', data=df_rmse, ax=ax2, line_kws={"color": "red"})
@@ -241,7 +236,7 @@ if not df_rmse.empty:
     ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax2.grid(True, linestyle='--')
 
-# --- PLOT 3: Cost vs. Forecast Bias (Bottom-Left) ---
+# Cost vs. Forecast Bias (Bottom-Left) 
 ax3 = axes[1, 0]
 if not df_bias.empty:
     sns.regplot(x='bias', y='cost', data=df_bias, ax=ax3, order=2, line_kws={"color": "purple"}, scatter_kws={'alpha':0.6})
@@ -251,10 +246,10 @@ if not df_bias.empty:
     ax3.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax3.grid(True, linestyle='--')
 
-# --- Turn off the unused subplot (Bottom-Right) ---
+
 axes[1, 1].axis('off')
 
-# THIS IS THE FIX: Use subplots_adjust for spacing instead of tight_layout with a bad rect
+
 plt.subplots_adjust(hspace=0.4, wspace=0.3)
 plt.show()
 
