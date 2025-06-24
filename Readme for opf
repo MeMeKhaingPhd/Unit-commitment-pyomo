@@ -1,0 +1,55 @@
+#Solar Forecast Impact on Optimal Power Flow (OPF)**
+This code analyzes the impact of solar power forecasting on the economic and physical operation of a power grid. It uses a pipeline that combines a machine learning model (XGBoost) for solar forecasting with a mathematical optimization model (Pyomo) for performing an Optimal Power Flow (OPF).
+The primary goal is to conduct a sensitivity analysis to answer key questions:
+
+1. How does the accuracy (RMSE) of a solar forecast affect the total operational cost of the grid?
+2. How does a systematic bias (over- or under-predicting) in a forecast affect costs and operations?
+3. What is the impact of increasing renewable penetration on costs, emissions, and energy curtailment?
+4. How does a carbon price change the dispatch decisions and total emissions?
+
+#This is contained within a single Python script: opf_sensitivity_analysis_pyomo_power_system_model1.py. The script is divided into four main parts:
+**Part 1: Solar Power Forecasting:
+Loads a real-world solar generation dataset from a public GitHub repository : this is from Aswin Sir
+Pre-processes the data, creating time-based and weather-based features.
+Trains an XGBoost regression model to predict solar power generation.
+The "true" generation values from the test set are used as a baseline for the subsequent experiments.
+**Part 2: Optimal Power Flow (OPF) Model:
+Defines a DC Optimal Power Flow model for a 3-bus power system using the Pyomo library.
+The model's objective is to meet the electricity demand at minimum cost, subject to physical constraints.
+Key Features of the Model:
+Quadratic Generation Costs: Accurately models the non-linear costs of thermal generators.
+Line Limits: Enforces transmission line capacity constraints.
+Renewable Curtailment: Includes a decision variable that allows the model to "waste" excess solar energy if it cannot be used or exported due to grid congestion. This is crucial for ensuring the model remains feasible under high renewable generation scenarios.
+Carbon Pricing: Optionally includes a cost for CO2 emissions in the objective function.
+**Part 3: Sensitivity Analysis Experiments:
+This section systematically runs the OPF model under four different experimental setups:
+Varying Forecast Accuracy (RMSE): The "perfect" solar forecast is degraded with increasing levels of random noise to simulate different forecast accuracies.
+Varying Forecast Bias: A systematic bias is added to the perfect forecast to simulate consistent over- or under-prediction.
+Varying Renewable Penetration: The amount of available solar power is scaled up to simulate a future grid with higher levels of renewables.
+Penetration with Emission Costs: The penetration experiment is repeated with a carbon price to analyze its effect on generator dispatch and total emissions.
+*Part 4: Visualization:
+The results from all experiments are collected into pandas DataFrames.
+Matplotlib and Seaborn are used to generate a 2x2 grid of plots, visualizing the outcome of each of the four experiments.
+
+How to Run the Code
+Prerequisites
+We must have Python installed, along with the following packages. It is highly recommended to use a virtual environment.
+*pandas
+*numpy
+*scikit-learn
+*xgboost
+*pyomo
+*matplotlib
+*seaborn
+
+## pip install pandas numpy scikit-learn xgboost pyomo matplotlib seaborn
+
+#Required Solver
+The OPF model requires a solver. The script is configured to use Gurobi by default, as it is a high-performance solver for quadratic programs. If Gurobi is not installed or licensed, the script will automatically fall back to using CBC, which is an open-source solver included with Pyomo.
+
+##Interpreting the Results
+The final output is a set of four plots, each corresponding to one of the experiments.
+Plot 1 (RMSE vs. Cost): Shows that as the forecast error increases, the total operational cost of the system also tends to increase.
+Plot 2 (Bias vs. Cost): Typically shows a "U-shaped" cost curve. Both significantly under-predicting (negative bias) and over-predicting (positive bias) lead to higher costs compared to an unbiased forecast.
+Plot 3 (Penetration vs. Cost & Curtailment): Illustrates that while increasing solar penetration reduces costs, it leads to a sharp increase in curtailed (wasted) energy due to network constraints. This demonstrates the "diminishing returns" of adding renewables without grid upgrades.
+Plot 4 (Penetration vs. Emissions & Curtailment): Shows how a carbon price influences the system. While it increases the total cost, it effectively reduces emissions. The physical curtailment remains the same, as it is dictated by line limits, not economics.
