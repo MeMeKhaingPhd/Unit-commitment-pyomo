@@ -53,7 +53,6 @@ df.ffill(inplace=True)
 df.bfill(inplace=True)
 
 target = 'Solar_MW'
-
 features = [
     'Temperature', 'Clearsky.DHI', 'Clearsky.DNI', 'Clearsky.GHI', 'Cloud.Type', 
     'Dew.Point', 'DHI', 'DNI', 'Fill.Flag', 'GHI', 'Ozone', 'Relative.Humidity', 
@@ -62,9 +61,7 @@ features = [
 ]
 X = df[[f for f in features if f in df.columns]].copy()
 y = df[target].copy()
-
-X.ffill(inplace=True)
-X.bfill(inplace=True)
+X.ffill(inplace=True); X.bfill(inplace=True)
 
 print(f"Using {len(X.columns)} features for XGBoost model.")
 
@@ -85,10 +82,24 @@ print(f"Using a {T_horizon}-hour slice of TRUE solar generation for experiments.
 
 
 
-#  ECONOMIC DISPATCH (ED) MODEL DEFINITION
+# 2: OPTIMAL POWER FLOW (OPF) MODEL DEFINITION
 
-print("--- Part 2: Defining the Single-Node Power System and ED Model ---")
+print("--- Part 2: Defining the 3-Bus Power System and OPF Model ---")
 
+# System Topology 
+BaseMVA = 100.0
+nodes_data = {"Bus1": {"is_reference": True}, "Bus2": {}, "Bus3": {}}
+# Scale line capacities to handle large real data flows
+line_capacity_scaling = 10
+lines_data = {
+    ("Bus1", "Bus2"): {"reactance_pu": 0.1, "capacity_mw": 200 * line_capacity_scaling},
+    ("Bus1", "Bus3"): {"reactance_pu": 0.08, "capacity_mw": 150 * line_capacity_scaling},
+    ("Bus2", "Bus3"): {"reactance_pu": 0.05, "capacity_mw": 180 * line_capacity_scaling},
+}
+print(f"NOTE: Transmission line capacities scaled by {line_capacity_scaling} to be feasible.")
+SOLAR_BUS = "Bus2" # Solar is located at Bus 2
+
+# Load and Process Real Data 
 try:
     oil_east_data = pd.read_csv(url_oil_east).iloc[0]
     oil_west_data = pd.read_csv(url_oil_west).iloc[0]
@@ -99,41 +110,72 @@ except Exception as e:
     print(f"\nFATAL ERROR: Could not load a data file from its URL. Error: {e}")
     exit()
 
-capacity_scaling_factor = 10
+# Scale generator capacities to handle large real demand
+gen_capacity_scaling = 10
 generators_data = [
-    {"id": "Oil_East", "Pmin": 0, "Pmax": oil_east_data['Capacity (MW)'] * capacity_scaling_factor, "Cost_Gen_Linear": 20, "Cost_Gen_Quadratic": 0.02, "Emission_Rate": 0.25},
-    {"id": "Oil_West", "Pmin": 0, "Pmax": oil_west_data['Capacity (MW)'] * capacity_scaling_factor, "Cost_Gen_Linear": 18, "Cost_Gen_Quadratic": 0.015, "Emission_Rate": 0.20},
-    {"id": "Oil_Central", "Pmin": 0, "Pmax": oil_central_data['Capacity (MW)'] * capacity_scaling_factor, "Cost_Gen_Linear": 25, "Cost_Gen_Quadratic": 0.03, "Emission_Rate": 0.30},
+    {"id": "Oil_East", "bus": "Bus1", "Pmin": 0, "Pmax": oil_east_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 20, "Cost_Gen_Quadratic": 0.02},
+    {"id": "Oil_West", "bus": "Bus2", "Pmin": 0, "Pmax": oil_west_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 18, "Cost_Gen_Quadratic": 0.015},
+    {"id": "Oil_Central", "bus": "Bus3", "Pmin": 0, "Pmax": oil_central_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 25, "Cost_Gen_Quadratic": 0.03},
 ]
-print(f"NOTE: Conventional generator capacities scaled by {capacity_scaling_factor} to be feasible for real demand.")
+print(f"NOTE: Conventional generator capacities scaled by {gen_capacity_scaling} to be feasible.")
 total_demand_profile = demand_df['Demand (MW)'].iloc[:T_horizon].tolist()
+nodal_demand_fractions = {"Bus1": 0.2, "Bus2": 0.5, "Bus3": 0.3}
 
-def create_economic_dispatch_model(demand_profile, solar_forecast):
-    model = pyo.ConcreteModel(name="EconomicDispatch")
-    model.I_conv = pyo.Set(initialize=[gen['id'] for gen in generators_data])
-    model.T = pyo.RangeSet(1, T_horizon)
-    model.Pmax = pyo.Param(model.I_conv, initialize={gen['id']: gen['Pmax'] for gen in generators_data})
-    model.Cost_Linear = pyo.Param(model.I_conv, initialize={gen['id']: gen['Cost_Gen_Linear'] for gen in generators_data})
-    model.Cost_Quad = pyo.Param(model.I_conv, initialize={gen['id']: gen['Cost_Gen_Quadratic'] for gen in generators_data})
-    model.Demand = pyo.Param(model.T, initialize={t: demand_profile[t-1] for t in model.T})
-    model.Solar_Available = pyo.Param(model.T, initialize={t: solar_forecast[t-1] for t in model.T})
-    model.g_conv = pyo.Var(model.I_conv, model.T, domain=pyo.NonNegativeReals)
-    model.p_curtail = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+def create_opf_model(hourly_demand, solar_forecast):
+    """Creates a 3-bus Optimal Power Flow (OPF) Pyomo model."""
+    model = pyo.ConcreteModel(name="OptimalPowerFlow")
+    
+    # SETS
+    model.I_set = pyo.Set(initialize=[gen['id'] for gen in generators_data])
+    model.T_set = pyo.RangeSet(1, T_horizon)
+    model.B_nodes = pyo.Set(initialize=nodes_data.keys())
+    model.L_lines = pyo.Set(initialize=lines_data.keys(), dimen=2)
+
+    # PARAMETERS
+    model.Pmax = pyo.Param(model.I_set, initialize={gen['id']: gen['Pmax'] for gen in generators_data})
+    model.Cost_Linear = pyo.Param(model.I_set, initialize={gen['id']: gen['Cost_Gen_Linear'] for gen in generators_data})
+    model.Cost_Quad = pyo.Param(model.I_set, initialize={gen['id']: gen['Cost_Gen_Quadratic'] for gen in generators_data})
+    model.GenBus = pyo.Param(model.I_set, initialize={gen['id']: gen['bus'] for gen in generators_data}, within=pyo.Any)
+    model.LineReactance = pyo.Param(model.L_lines, initialize={line: data['reactance_pu'] for line, data in lines_data.items()})
+    model.LineCapacity = pyo.Param(model.L_lines, initialize={line: data['capacity_mw'] for line, data in lines_data.items()})
+    model.BaseMVA = pyo.Param(initialize=BaseMVA)
+    model.ReferenceBus = pyo.Param(initialize=next(b for b, d in nodes_data.items() if d.get("is_reference")), within=pyo.Any)
+    model.SolarPotential = pyo.Param(model.T_set, initialize={t: solar_forecast[t-1] for t in model.T_set})
+
+    # HELPER SETS
+    model.GeneratorsAtBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [i for i in m.I_set if m.GenBus[i] == b])
+    model.LinesFromBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [l for l in m.L_lines if l[0] == b])
+    model.LinesToBus = pyo.Set(model.B_nodes, initialize=lambda m, b: [l for l in m.L_lines if l[1] == b])
+
+    # VARIABLES
+    model.g = pyo.Var(model.I_set, model.T_set, domain=pyo.NonNegativeReals)
+    model.theta = pyo.Var(model.B_nodes, model.T_set, domain=pyo.Reals)
+    model.pline = pyo.Var(model.L_lines, model.T_set, domain=pyo.Reals)
+    model.p_curtail = pyo.Var(model.T_set, domain=pyo.NonNegativeReals)
+
+    # OBJECTIVE
     def total_cost_rule(m):
-        return sum(m.Cost_Linear[i] * m.g_conv[i,t] + m.Cost_Quad[i] * (m.g_conv[i,t]**2) 
-                   for i in m.I_conv for t in m.T)
+        return sum(m.Cost_Linear[i] * m.g[i, t] + m.Cost_Quad[i] * (m.g[i, t]**2) for i in m.I_set for t in m.T_set)
     model.TotalCost = pyo.Objective(rule=total_cost_rule, sense=pyo.minimize)
-    def power_balance_rule(m, t):
-        total_conventional_gen = sum(m.g_conv[i, t] for i in m.I_conv)
-        solar_gen_used = m.Solar_Available[t] - m.p_curtail[t]
-        return total_conventional_gen + solar_gen_used == m.Demand[t]
-    model.PowerBalance = pyo.Constraint(model.T, rule=power_balance_rule)
-    def gen_limits_rule(m, i, t):
-        return m.g_conv[i,t] <= m.Pmax[i]
-    model.GenLimits = pyo.Constraint(model.I_conv, model.T, rule=gen_limits_rule)
-    def curtailment_limits_rule(m, t):
-        return m.p_curtail[t] <= m.Solar_Available[t]
-    model.CurtailmentLimits = pyo.Constraint(model.T, rule=curtailment_limits_rule)
+
+    # CONSTRAINTS
+    def power_balance_rule(m, b, t):
+        generation_at_bus = sum(m.g[i, t] for i in m.GeneratorsAtBus[b])
+        demand_at_bus = hourly_demand[b][t-1]
+        solar_injection = 0
+        if b == SOLAR_BUS:
+            solar_injection = m.SolarPotential[t] - m.p_curtail[t]
+        flow_out = sum(m.pline[line, t] for line in m.LinesFromBus[b])
+        flow_in = sum(m.pline[line, t] for line in m.LinesToBus[b])
+        return generation_at_bus + solar_injection - demand_at_bus == flow_out - flow_in
+    model.PowerBalance = pyo.Constraint(model.B_nodes, model.T_set, rule=power_balance_rule)
+    
+    model.GenLimits = pyo.Constraint(model.I_set, model.T_set, rule=lambda m, i, t: m.g[i, t] <= m.Pmax[i])
+    model.CurtailmentLimits = pyo.Constraint(model.T_set, rule=lambda m, t: m.p_curtail[t] <= m.SolarPotential[t])
+    model.DCPowerFlow = pyo.Constraint(model.L_lines, model.T_set, rule=lambda m, l_from, l_to, t: m.pline[(l_from, l_to), t] == (m.BaseMVA / m.LineReactance[(l_from, l_to)]) * (m.theta[l_from, t] - m.theta[l_to, t]))
+    model.LineFlowLimits = pyo.Constraint(model.L_lines, model.T_set, rule=lambda m, l_from, l_to, t: pyo.inequality(-m.LineCapacity[(l_from, l_to)], m.pline[(l_from, l_to), t], m.LineCapacity[(l_from, l_to)]))
+    model.ReferenceAngle = pyo.Constraint(model.T_set, rule=lambda m, t: m.theta[m.ReferenceBus, t] == 0.0)
+    
     return model
 
 try:
@@ -143,22 +185,36 @@ except Exception:
     solver = pyo.SolverFactory('cbc')
 
 
-# RUNNING THE TWO-LEVEL SIMULATION
+
+#  3: RUNNING THE TWO-LEVEL SIMULATION
 
 print("\n--- Part 3: Running Two-Level Simulation Experiments ---")
 
-def run_dispatch_and_get_results(solar_forecast):
-    model = create_economic_dispatch_model(total_demand_profile, solar_forecast)
+def get_hourly_demand_at_bus():
+    """Splits the total demand profile across the three buses."""
+    return {bus: [total_demand_profile[t] * nodal_demand_fractions[bus] for t in range(T_horizon)] for bus in nodes_data.keys()}
+
+def run_opf_and_get_results(solar_forecast):
+    """Solves the OPF model and returns detailed results."""
+    hourly_demand = get_hourly_demand_at_bus()
+    model = create_opf_model(hourly_demand, solar_forecast)
     results = solver.solve(model, tee=False)
+
     if results.solver.termination_condition != pyo.TerminationCondition.optimal:
         return {'status': str(results.solver.termination_condition)}
-    dispatch = {gen['id']: [pyo.value(model.g_conv[gen['id'], t]) for t in model.T] for gen in generators_data}
-    dispatch['Solar_Used'] = [pyo.value(model.Solar_Available[t] - model.p_curtail[t]) for t in model.T]
-    dispatch['Curtailment'] = [pyo.value(model.p_curtail[t]) for t in model.T]
-    return {'status': 'optimal', 'cost': pyo.value(model.TotalCost), 'dispatch_df': pd.DataFrame(dispatch)}
 
-print("\n--- Running Base Case Analysis (Median Forecast) ---")
-base_case_results = run_dispatch_and_get_results(true_solar_generation)
+    dispatch = {gen['id']: [pyo.value(model.g[gen['id'], t]) for t in model.T_set] for gen in generators_data}
+    dispatch['Solar_Used'] = [pyo.value(model.SolarPotential[t] - model.p_curtail[t]) for t in model.T_set]
+    dispatch['Curtailment'] = [pyo.value(model.p_curtail[t]) for t in model.T_set]
+    
+    return {
+        'status': 'optimal',
+        'cost': pyo.value(model.TotalCost),
+        'dispatch_df': pd.DataFrame(dispatch)
+    }
+
+print("\n--- Running Base Case Analysis ---")
+base_case_results = run_opf_and_get_results(true_solar_generation)
 
 print("\n--- Running Experiment: Impact of Forecast RMSE on Cost ---")
 results_rmse = []
@@ -166,39 +222,36 @@ target_rmses = np.linspace(50, 500, 10)
 for r in target_rmses:
     noise = np.random.normal(loc=0, scale=r, size=T_horizon)
     noisy_forecast = np.maximum(0, true_solar_generation + noise)
-    res = run_dispatch_and_get_results(noisy_forecast)
-    if res['status'] == 'optimal':
+    res = run_opf_and_get_results(noisy_forecast)
+    if res.get('status') == 'optimal':
         res['rmse'] = np.sqrt(mean_squared_error(true_solar_generation, noisy_forecast))
         results_rmse.append(res)
         print(f"Target RMSE: {r:6.1f} | Actual RMSE: {res['rmse']:6.1f} | Cost: ${res.get('cost', 0):,.0f}")
 df_rmse = pd.DataFrame(results_rmse)
 
-#  Experiment Impact of Forecast Bias 
 print("\n--- Running Experiment: Impact of Forecast Bias on Cost ---")
 results_bias = []
 mean_solar = true_solar_generation.mean()
-# Use a reasonable range of bias, +/- 50% of the average solar generation
 bias_levels = np.linspace(-0.5 * mean_solar, 0.5 * mean_solar, 11)
 for bias in bias_levels:
     biased_forecast = np.maximum(0, true_solar_generation + bias)
-    res = run_dispatch_and_get_results(biased_forecast)
-    if res['status'] == 'optimal':
+    res = run_opf_and_get_results(biased_forecast)
+    if res.get('status') == 'optimal':
         res['bias'] = bias
         results_bias.append(res)
-        print(f"Bias: {bias:6.1f} MW | Status: {res['status']:<12} | Cost: ${res.get('cost', 0):,.0f}")
+        print(f"Bias: {bias:6.1f} MW | Status: {res.get('status', 'failed'):<12} | Cost: ${res.get('cost', 0):,.0f}")
 df_bias = pd.DataFrame(results_bias)
 
 
 
-# VISUALIZATION
+# 4: VISUALIZATION
 
 print("\n--- Part 4: Visualizing Results ---")
 sns.set_style("whitegrid")
-
 fig, axes = plt.subplots(2, 2, figsize=(18, 14))
-fig.suptitle('Two-Level Economic Dispatch Simulation Results', fontsize=18)
+fig.suptitle('Two-Level Optimal Power Flow (OPF) Simulation Results', fontsize=18)
 
-#Dispatch Stack for the Base Case 
+# PLOT 1: Dispatch Stack 
 ax1 = axes[0, 0]
 if base_case_results.get('status') == 'optimal':
     dispatch_df = base_case_results['dispatch_df']
@@ -215,18 +268,16 @@ if base_case_results.get('status') == 'optimal':
     ax1.set_ylabel('Power (MW)')
     ax1.set_xticks(range(0, T_horizon, 2))
     ax1.grid(True, axis='y', linestyle='--')
-    
     ax1_twin = ax1.twinx()
     ax1_twin.plot(range(T_horizon), dispatch_df['Curtailment'], color='red', linestyle=':', marker='o', markersize=4, label='Curtailment')
     ax1_twin.set_ylabel('Curtailment (MW)', color='red')
     ax1_twin.tick_params(axis='y', labelcolor='red')
     ax1_twin.set_ylim(bottom=0)
-
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax1_twin.get_legend_handles_labels()
     ax1.legend(lines + lines2, labels + labels2, loc='upper left')
 
-# Cost vs. Forecast Error (RMSE) 
+# PLOT 2: Cost vs. RMSE 
 ax2 = axes[0, 1]
 if not df_rmse.empty:
     sns.regplot(x='rmse', y='cost', data=df_rmse, ax=ax2, line_kws={"color": "red"})
@@ -236,7 +287,7 @@ if not df_rmse.empty:
     ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax2.grid(True, linestyle='--')
 
-# Cost vs. Forecast Bias 
+# PLOT 3: Cost vs. Bias 
 ax3 = axes[1, 0]
 if not df_bias.empty:
     sns.regplot(x='bias', y='cost', data=df_bias, ax=ax3, order=2, line_kws={"color": "purple"}, scatter_kws={'alpha':0.6})
@@ -246,11 +297,10 @@ if not df_bias.empty:
     ax3.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax3.grid(True, linestyle='--')
 
-
+# Turn off the unused subplot 
 axes[1, 1].axis('off')
 
-
-plt.subplots_adjust(hspace=0.4, wspace=0.3)
+plt.tight_layout(rect=[0, 0, 1, 0.92])
 plt.show()
 
 print("\nScript finished successfully.")
