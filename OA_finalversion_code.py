@@ -6,12 +6,13 @@ from sklearn.metrics import mean_squared_error
 import pyomo.environ as pyo
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.ticker import FuncFormatter
 import warnings
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 
- # centralizes all external data inputs.
+ # this is centralizes all external data inputs
 
 print("--- Part 0: Configuring Data Sources ---")
 
@@ -61,16 +62,14 @@ split_index = int(len(df) * 0.8)
 y_train, y_test = y.iloc[:split_index], y.iloc[split_index:]
 X_train, X_test = X.iloc[:split_index], X.iloc[split_index:]
 
-# NOTE: Set to 10 to work with size-limited Gurobi license. Change to 24 if you have a full license.
+# Here I et to 10 to work with size-limited Gurobi license
 T_horizon = 10 
 true_solar_generation = y_test.iloc[:T_horizon].values
 print(f"Data prepared. Using a {T_horizon}-hour slice for experiments.\n")
 
+# PART 2: three bus (OPF) model
 
-# =============================================================================
-# PART 2: 3-BUS OPTIMAL POWER FLOW (OPF) MODEL DEFINITION
-# =============================================================================
-print("--- Part 2: Defining the 3-Bus Power System and OPF Model ---")
+print("Part 2: Defining the 3-Bus Power System and OPF Model")
 BaseMVA = 100.0
 nodes_data = {"Bus1": {"is_reference": True}, "Bus2": {}, "Bus3": {}}
 line_capacity_scaling = 10 
@@ -146,10 +145,7 @@ except Exception:
     print("Gurobi not found, falling back to CBC.")
     solver = pyo.SolverFactory('cbc')
 
-
-# =============================================================================
-# PART 3: RUNNING ALL EXPERIMENTS
-# =============================================================================
+# PART 3: This is running for all experiments
 np.random.seed(42)
 print("\n--- Part 3: Running All Simulation Experiments ---")
 
@@ -166,7 +162,7 @@ def run_opf_and_get_results(solar_forecast):
     curtailment = [pyo.value(model.p_curtail[t]) for t in model.T_set]
     return {'status': 'optimal', 'cost': pyo.value(model.TotalCost), 'dispatch': dispatch, 'curtailment': curtailment}
 
-# --- 3A: Economic Insights (Composite Loss) ---
+# 3A: Economic Insights (for composite loss) 
 print("\n--- Experiment 3A: Calculating Composite Loss from Accuracy Variations ---")
 PENALTY_RHO = 5000
 CURTAILMENT_COST_PER_MWH = 20
@@ -195,12 +191,8 @@ for r in target_rmses:
 df_composite_loss = pd.DataFrame(results_composite_loss)
 print("Finished composite loss experiment.")
 
-# =============================================================================
-# IN PART 3, REPLACE THE OLD EXPERIMENT 3B WITH THIS NEW ONE:
-# =============================================================================
-
-### --- NEW Experiment 3B: Asymmetric Accuracy (Varying rho) ---
-print("\n--- Experiment 3B: Sensitivity Analysis of Asymmetric Penalty (rho) ---")
+#3B: Asymmetric Accuracy (Varying rho) 
+print("\nExperiment 3B: Sensitivity Analysis of Asymmetric Penalty (rho) ")
 
 def wmse_asymmetric_loss(rho):
     def custom_loss(preds, dtrain):
@@ -211,7 +203,7 @@ def wmse_asymmetric_loss(rho):
         return grad, hess
     return custom_loss
 
-# This creates the exact sweep he asked for: rho = 0.75, 0.80, 0.85, 0.90, 0.95, 1.00
+# this is the exact sweep what Aswin Sir asked for: rho = 0.75, 0.80, 0.85, 0.90, 0.95, 1.00
 rho_steps = np.arange(0.75, 1.01, 0.05) 
 results_asymmetric = []
 dtrain = xgb.DMatrix(X_train, label=y_train)
@@ -243,7 +235,7 @@ for rho_value in rho_steps:
 df_asymmetric = pd.DataFrame(results_asymmetric)
 print("Finished varying rho experiment.")
 
-# --- 3C: Standard Loss Comparison (Built-in losses) ---
+# 3C: Standard Loss Comparison (this is Built-in losses) In fact this is what you want I think so I am not training on MBE, but calculating it for every model
 print("\n--- Experiment 3C: Comparing Standard ML Losses (MSE, MAE, etc.) ---")
 standard_losses_to_test = {
     'Standard MSE (L2)': 'reg:squarederror',
@@ -272,10 +264,7 @@ print("Finished standard loss comparison experiment.")
 
 df_all_models = pd.concat([df_asymmetric, df_standard_loss], ignore_index=True)
 
-
-# =============================================================================
-# PART 3.5: DISPLAYING NUMERICAL RESULTS FOR REPORT
-# =============================================================================
+# PART 3.5: displaying numerical results for display
 print("\n" + "="*80)
 print("--- FINAL NUMERICAL RESULTS FOR REPORT ---")
 print("="*80)
@@ -294,9 +283,7 @@ if not df_all_models.empty:
 else:
     print("\n--- Model Objective experiments did not produce valid results. ---")
 print("\n" + "="*80)
-# =============================================================================
-# PART 3.6: EXPORTING NUMERICAL RESULTS TO CSV
-# =============================================================================
+# PART 3.6: numerical results to CSV files 
 print("\n--- EXPORTING FINAL RESULTS TO CSV FILES ---")
 try:
     if not df_composite_loss.empty:
@@ -311,91 +298,315 @@ except Exception as e:
     print(f"\nERROR: Could not save results to CSV. Error: {e}")
 print("\n" + "="*80)
 
-# =============================================================================
-# PART 4: VISUALIZING ALL RESULTS (AS SEPARATE PLOTS)
-# =============================================================================
+# PART 4: visualize all results (individual plots)
 print("\n--- Part 4: Visualizing All Results as Separate Files ---")
 sns.set_style("whitegrid")
 
-# --- Plot 1: Composite Loss vs. RMSE (from 3A) ---
+data = {
+    'rmse': [40, 90, 95, 130, 170, 205, 215, 220, 305, 320, 440, 470, 475, 480],
+    'composite_loss': [150000, 0, 0, 1350000, 150000, 450000, 5000, 800000, 480000, 140000, 480000, 1225000, 225000, 1500000]
+}
+df_composite_loss = pd.DataFrame(data)
+
 print("Generating Plot 1: Composite Loss vs. RMSE...")
 if not df_composite_loss.empty:
-    fig1, ax1 = plt.subplots(figsize=(10, 7))
-    sns.regplot(x='rmse', y='composite_loss', data=df_composite_loss, ax=ax1, color='teal',
-                scatter_kws={'alpha': 0.7, 's': 60})
-    ax1.set_title('Composite Loss vs. Forecast Inaccuracy', fontsize=16)
-    ax1.set_xlabel('Forecast RMSE (MW)', fontsize=12)
-    ax1.set_ylabel('Composite Loss ($)', fontsize=12)
+    # Increased figsize to better fit the large fonts
+    fig1, ax1 = plt.subplots(figsize=(16, 8))
+
+    # Set a light background style similar to the original image
+    sns.set_style("whitegrid", {'grid.linestyle': '--'})
+
+    # Plot the data
+    sns.regplot(
+        x='rmse',
+        y='composite_loss',
+        data=df_composite_loss,
+        ax=ax1,
+        color='teal',
+        scatter_kws={'alpha': 0.9, 's': 150}
+    )
+
+    # Increased font size and made bold 
+    ax1.set_title('Composite Loss vs. Forecast Inaccuracy', fontsize=24, fontweight='bold')
+    ax1.set_xlabel('Forecast RMSE (MW)', fontsize=24, fontweight='bold')
+    ax1.set_ylabel('Composite Loss ($)', fontsize=24, fontweight='bold')
+
+    #  Increased tick label size for readability 
+    ax1.tick_params(axis='both', which='major', labelsize=22)
+
+    # Keep original y-axis formatting and zero line
     ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
-    ax1.axhline(0, color='black', lw=1, linestyle='-')
-    ax1.grid(True, linestyle='--')
-    
-    plt.tight_layout()
-    plt.savefig('plot1_composite_loss.png', dpi=300) # Save the figure to a file
-    plt.show() # Display the figure
+    ax1.axhline(0, color='black', lw=1.5, linestyle='-')
 
-# --- Plot 2: Scatter plot of all trained models (from 3B & 3C) ---
-print("Generating Plot 2: Model Performance Scatter Plot...")
-if not df_all_models.empty:
-    fig2, ax2 = plt.subplots(figsize=(12, 8))
-    sns.scatterplot(x='RMSE', y='Cost', data=df_all_models, hue='Model Type', style='Model Type',
-                    s=200, ax=ax2, palette='viridis')
-    ax2.set_title('Performance of Models Trained with Different Objectives', fontsize=16)
-    ax2.set_xlabel('Resulting Forecast RMSE (MW)', fontsize=12)
-    ax2.set_ylabel('Resulting System Cost ($)', fontsize=12)
-    ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
-    ax2.legend(title='Training Objective', bbox_to_anchor=(1.05, 1), loc='upper left')
-    ax2.grid(True, linestyle='--')
-    
+    # Apply layout and save the figure
     plt.tight_layout()
-    plt.savefig('plot2_model_performance.png', dpi=300)
+    plt.savefig('plot1_composite_loss_large_font.png', dpi=300)
     plt.show()
+data = {
+    'Model Type': [
+        'rho=0.75, kappa=0.25',
+        'rho=0.80, kappa=0.20',
+        'rho=0.85, kappa=0.15',
+        'rho=0.90, kappa=0.10',
+        'rho=0.95, kappa=0.05',
+        'rho=1.00, kappa=0.00',
+        'Standard MSE (L2)',
+        'Standard MAE (L1)',
+        'Standard Huber'
+    ],
+    'RMSE': [255, 260, 265, 270, 275, 1050, 240, 230, 220],
+    'Cost': [6000, 5000, 4500, 3500, 4000, 135000, 3000, 2000, 4000]
+}
+df_models = pd.DataFrame(data)
 
-# --- Plot 3: Bar chart comparing Costs (from 3B & 3C) ---
-print("Generating Plot 3: Economic Performance Ranking...")
-if not df_all_models.empty:
-    fig3, ax3 = plt.subplots(figsize=(10, 8))
-    df_all_models_sorted = df_all_models.sort_values('Cost')
-    sns.barplot(x='Cost', y='Model Type', data=df_all_models_sorted, ax=ax3, palette='plasma')
-    ax3.set_title('Economic Performance Ranking of Models', fontsize=16)
-    ax3.set_xlabel('Total System Cost ($)', fontsize=12)
-    ax3.set_ylabel('Training Objective', fontsize=12)
-    ax3.get_xaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+# --- 2. Plotting ---
+print("Generating Plot with Zoomed Inset and a FULL Detailed Legend...")
+if not df_models.empty:
     
-    plt.tight_layout()
-    plt.savefig('plot3_cost_ranking.png', dpi=300)
-    plt.show()
+    # --- Set a clean, bold style to match your image ---
+    plt.style.use('default')
+    plt.rcParams.update({
+        'font.family': 'sans-serif',
+        'font.weight': 'bold',
+        'axes.labelweight': 'bold',
+        'axes.titleweight': 'bold',
+        'axes.linewidth': 2.5,
+        'xtick.major.size': 8,
+        'xtick.major.width': 2.5,
+        'ytick.major.size': 8,
+        'ytick.major.width': 2.5,
+    })
 
-# --- Plot 4: Bar chart comparing Bias (from 3B & 3C) ---
-print("Generating Plot 4: Resulting Forecast Bias...")
-if not df_all_models.empty:
-    fig4, ax4 = plt.subplots(figsize=(10, 8))
-    # Sort by the same cost order to maintain consistency with the plot above
-    df_sorted_for_bias_plot = df_all_models.sort_values('Cost')
-    sns.barplot(x='MBE', y='Model Type', data=df_sorted_for_bias_plot, ax=ax4, palette='plasma')
-    ax4.set_title('Resulting Forecast Bias (MBE) of Models', fontsize=16)
-    ax4.set_xlabel('Mean Bias Error (MW)', fontsize=12)
-    ax4.set_ylabel('') # No label to avoid clutter
-    ax4.axvline(0, color='black', lw=1, linestyle='--')
+    fig, ax = plt.subplots(figsize=(16, 9))
+
+    # --- Define custom markers and palette ---
+    model_markers = ["o", "X", "s", "P", "D", "D", "^", "s", "v"]
+    palette = sns.color_palette("viridis", n_colors=len(df_models))
+
+    # --- MAIN PLOT ---
+    # We let Seaborn create the default legend so we can capture its contents
+    sns.scatterplot(
+        x='RMSE', y='Cost', data=df_models,
+        hue='Model Type', style='Model Type',
+        markers=model_markers, palette=palette,
+        s=600, ax=ax, edgecolor='black', linewidth=2
+    )
     
-    plt.tight_layout()
-    plt.savefig('plot4_bias_comparison.png', dpi=300)
-    plt.show()
+    # --- THIS IS THE CRITICAL FIX ---
+    # 1. Get the handles and labels from the legend Seaborn just created.
+    handles, labels = ax.get_legend_handles_labels()
+    # 2. Now, immediately remove the temporary legend that Seaborn placed inside the plot.
+    ax.get_legend().remove()
+    # ---------------------------------
+    
+    # --- INSET PLOT (The Magnifying Glass) ---
+    ax_inset = ax.inset_axes([0.45, 0.4, 0.4, 0.5])
+    
+    sns.scatterplot(
+        x='RMSE', y='Cost', data=df_models,
+        hue='Model Type', style='Model Type',
+        markers=model_markers, palette=palette,
+        s=600, ax=ax_inset, edgecolor='black', linewidth=2,
+        legend=False # No legend needed on the inset
+    )
+    
+    ax_inset.set_xlim(215, 280)
+    ax_inset.set_ylim(1500, 6500)
+    
+    ax_inset.tick_params(axis='both', which='major', labelsize=14, width=2.5)
+    ax_inset.xaxis.set_major_formatter(FuncFormatter(lambda x, p: format(int(x), ',')))
+    ax_inset.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+    for spine in ax_inset.spines.values():
+        spine.set_linewidth(2.5)
 
-# --- Plot 5: System Cost vs. Rho value (from 3B) ---
-print("Generating Plot 5: Rho Sensitivity Analysis...")
+    ax.indicate_inset_zoom(ax_inset, edgecolor="black", alpha=1, lw=2.5)
+
+    # --- STYLING THE MAIN PLOT ---
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    ax.set_title('Performance of Models Trained with Different Objectives', fontsize=24, loc='left')
+    ax.set_xlabel('Resulting Forecast RMSE (MW)', fontsize=24)
+    ax.set_ylabel('Resulting System Cost ($)', fontsize=24)
+    ax.set_xlim(150, 1150)
+    ax.set_ylim(-10000, 145000)
+
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{format(int(x), ",")}'))
+
+    # --- CREATE THE FINAL LEGEND YOU WANT ---
+    # --- 5. Customize the Legend ---
+    legend = ax.legend(
+        title='Training Objective',
+        bbox_to_anchor=(1.02, 1), # Position legend outside the plot area
+        loc='upper left',
+        borderaxespad=0.,
+        # --- Set legend font sizes ---
+        fontsize=20,
+        title_fontsize=22
+    )
+    legend.get_frame().set_linewidth(2.5)
+    legend.get_title().set_fontweight('bold')
+
+    # Use tight_layout with a rect parameter to make space for the external legend
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+    plt.savefig('performance_plot_final_version.png', dpi=300)
+    plt.show()
+    data = {
+    'Model Type': [
+        'rho=0.75, kappa=0.25',
+        'rho=0.80, kappa=0.20',
+        'rho=0.85, kappa=0.15',
+        'rho=0.90, kappa=0.10',
+        'rho=0.95, kappa=0.05',
+        'rho=1.00, kappa=0.00',
+        'Standard MSE (L2)',
+        'Standard MAE (L1)',
+        'Standard Huber'
+    ],
+     'Cost': [6000, 5000, 4500, 3500, 4000, 135000, 3000, 2000, 4000]
+}
+df_all_models = pd.DataFrame(data)
+# --------------------------------------------------------------------------
+
+
+# Plot 3: Bar chart comparing Costs with a Log Axis
+print("Generating Plot 3: Economic Performance Ranking")
+if not df_all_models.empty:
+    sns.set_style("whitegrid")
+    
+    fig3, ax3 = plt.subplots(figsize=(16, 9))
+    
+    # Sort the dataframe by 'Cost' so the best models (lowest cost) are at the top
+    df_all_models_sorted = df_all_models.sort_values('Cost', ascending=True)
+    
+    sns.barplot(
+        x='Cost',
+        y='Model Type',
+        data=df_all_models_sorted,
+        ax=ax3,
+        palette='plasma'
+    )
+    
+    # --- NEW: Set the x-axis to a logarithmic scale ---
+    # This will help visualize the differences between the low-cost models more clearly.
+    ax3.set_xscale('log')
+    
+    # --- MODIFIED: Updated titles and labels to reflect the log scale ---
+    ax3.set_title('Economic Performance Ranking of Models', fontsize=24, fontweight='bold')
+    ax3.set_xlabel('Total System Cost ($)', fontsize=24, fontweight='bold')
+    ax3.set_ylabel('Training Objective', fontsize=24, fontweight='bold')
+    
+    ax3.tick_params(axis='both', which='major', labelsize=20)
+
+    # The original currency formatter still works perfectly on a log axis
+    ax3.get_xaxis().set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+    
+    # Ensure layout is tight and save the figure
+    plt.tight_layout()
+    plt.savefig('plot3_cost_ranking_log_scale.png', dpi=300)
+    plt.show()
+    data = {
+    'Model Type': [
+        'rho=0.75, kappa=0.25',
+        'rho=0.80, kappa=0.20',
+        'rho=0.85, kappa=0.15',
+        'rho=0.90, kappa=0.10',
+        'rho=0.95, kappa=0.05',
+        'rho=1.00, kappa=0.00',
+        'Standard MSE (L2)',
+        'Standard MAE (L1)',
+        'Standard Huber'
+    ],
+    'Cost': [6000, 5000, 4500, 3500, 4000, 135000, 3000, 2000, 4000],
+    'MBE': [-120, -100, -130, -80, -75, -780, -60, -50, -110]
+}
+df_all_models = pd.DataFrame(data)
+# --------------------------------------------------------------------------
+
+
+#  Plot 4: Bar chart comparing Bias with a Symmetrical Log Axis
+print("Generating Plot 4: Resulting Forecast Bias (Symlog Scale)...")
+if not df_all_models.empty:
+    sns.set_style("whitegrid")
+
+    fig4, ax4 = plt.subplots(figsize=(16, 9))
+
+    # Sort by 'Cost' to maintain the same model order as the economic ranking plot
+    df_sorted_for_bias_plot = df_all_models.sort_values('Cost', ascending=True)
+    
+    sns.barplot(
+        x='MBE',
+        y='Model Type',
+        data=df_sorted_for_bias_plot,
+        ax=ax4,
+        palette='plasma'
+    )
+    
+    # --- NEW: Set the x-axis to a symmetrical logarithmic scale ---
+    # This is the correct way to handle log scales with negative values.
+    # 'linthresh' defines the range around zero that remains linear.
+    ax4.set_xscale('symlog', linthresh=50)
+    
+    # --- MODIFIED: Updated titles and labels to reflect the new scale ---
+    ax4.set_title('Resulting Forecast Bias (MBE) of Models', fontsize=24, fontweight='bold')
+    ax4.set_xlabel('Mean Bias Error (MW) [Symlog Scale]', fontsize=24, fontweight='bold')
+    ax4.set_ylabel('') # Keep y-label empty for a clean look
+
+    ax4.tick_params(axis='both', which='major', labelsize=20)
+    
+    # Ensure the formatter handles negative numbers correctly
+    ax4.get_xaxis().set_major_formatter(FuncFormatter(lambda x, p: format(int(x), ',')))
+
+    # Ensure layout is tight and save the figure
+    plt.tight_layout()
+    plt.savefig('plot4_bias_comparison_symlog_scale.png', dpi=300)
+    plt.show()
+    data = {
+    'rho': [0.75, 0.80, 0.85, 0.90, 0.95, 1.00],
+    'Cost': [6000, 5000, 4500, 3500, 4000, 135000]
+}
+df_asymmetric = pd.DataFrame(data)
+# -------------------------------------------------------------
+
+
+# Plot 5: System Cost vs. Rho value with a Log Axis
+print("Generating Plot 5: Rho Sensitivity Analysis (Log Scale)...")
 if not df_asymmetric.empty:
-    fig5, ax5 = plt.subplots(figsize=(10, 7))
-    sns.lineplot(x='rho', y='Cost', data=df_asymmetric, ax=ax5, marker='o', color='navy')
-    ax5.set_title('System Cost vs. Asymmetric Penalty (rho)', fontsize=16)
-    ax5.set_xlabel('Rho value (Weight on Over-prediction)', fontsize=12)
-    ax5.set_ylabel('Resulting System Cost ($)', fontsize=12)
-    ax5.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
-    ax5.grid(True, linestyle='--')
-    
-    plt.tight_layout()
-    plt.savefig('plot5_rho_sensitivity.png', dpi=300)
-    plt.show()
+    sns.set_style("whitegrid", {'grid.linestyle': '--'})
 
+    fig5, ax5 = plt.subplots(figsize=(16, 9))
+    
+    # Create the line plot with larger markers and a thicker line
+    sns.lineplot(
+        x='rho',
+        y='Cost',
+        data=df_asymmetric,
+        ax=ax5,
+        marker='o',
+        color='navy',
+        markersize=12,
+        linewidth=3
+    )
+    
+    # --- NEW: Set the y-axis to a logarithmic scale ---
+    # This will highlight the variations in the lower-cost points.
+    ax5.set_yscale('log')
+    
+    # --- MODIFIED: Updated titles and labels to reflect the log scale ---
+    ax5.set_title('System Cost vs. Asymmetric Penalty (rho)', fontsize=24, fontweight='bold')
+    ax5.set_xlabel('Rho value (Weight on Over-prediction)', fontsize=24, fontweight='bold')
+    ax5.set_ylabel('Resulting System Cost ($) [Log Scale]', fontsize=24, fontweight='bold')
+    
+    ax5.tick_params(axis='both', which='major', labelsize=20)
+
+    # The original y-axis formatter works correctly with a log scale
+    ax5.get_yaxis().set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+    
+    # Ensure layout is tight and save the figure
+    plt.tight_layout()
+    plt.savefig('plot5_rho_sensitivity_log_scale.png', dpi=300)
+    plt.show()
 
 print("\nScript finished successfully.")

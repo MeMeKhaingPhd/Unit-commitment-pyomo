@@ -9,6 +9,8 @@ import seaborn as sns
 import warnings
 
 warnings.filterwarnings('ignore', category=FutureWarning)
+
+
  # centralizes all external data inputs.
 
 print("--- Part 0: Configuring Data Sources ---")
@@ -58,22 +60,17 @@ y = df[target]
 split_index = int(len(df) * 0.8)
 y_train, y_test = y.iloc[:split_index], y.iloc[split_index:]
 X_train, X_test = X.iloc[:split_index], X.iloc[split_index:]
-xgb_reg = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=1000, learning_rate=0.05, max_depth=5, 
-                           subsample=0.8, colsample_bytree=0.8, random_state=42, n_jobs=-1,
-                           early_stopping_rounds=50)
-xgb_reg.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
-rmse = np.sqrt(mean_squared_error(y_test, xgb_reg.predict(X_test)))
-print(f"Base XGBoost Model Trained. Test RMSE on real data: {rmse:.2f} MW")
 
-# NOTE: Set to 10 to work with size-limited Gurobi license. I dont have full license so
+# NOTE: Set to 10 to work with size-limited Gurobi. Change to 24 for a full license.
 T_horizon = 10 
 true_solar_generation = y_test.iloc[:T_horizon].values
-print(f"Using a {T_horizon}-hour slice of TRUE solar generation for experiments.\n")
+print(f"Data prepared. Using a {T_horizon}-hour slice for experiments.\n")
 
+
+# =============================================================================
 # PART 2: 3-BUS OPTIMAL POWER FLOW (OPF) MODEL DEFINITION
-
+# =============================================================================
 print("--- Part 2: Defining the 3-Bus Power System and OPF Model ---")
-
 BaseMVA = 100.0
 nodes_data = {"Bus1": {"is_reference": True}, "Bus2": {}, "Bus3": {}}
 line_capacity_scaling = 10 
@@ -82,9 +79,7 @@ lines_data = {
     ("Bus1", "Bus3"): {"reactance_pu": 0.08, "capacity_mw": 150 * line_capacity_scaling},
     ("Bus2", "Bus3"): {"reactance_pu": 0.05, "capacity_mw": 180 * line_capacity_scaling},
 }
-print(f"NOTE: Transmission line capacities scaled by {line_capacity_scaling} to ensure feasibility.")
 SOLAR_BUS = "Bus2" 
-
 try:
     oil_east_data = pd.read_csv(url_oil_east).iloc[0]
     oil_west_data = pd.read_csv(url_oil_west).iloc[0]
@@ -92,16 +87,14 @@ try:
     demand_df = pd.read_csv(url_demand_data)
     print("All real data files loaded successfully.")
 except Exception as e:
-    print(f"\nFATAL ERROR: Could not load a data file from its URL. Error: {e}")
+    print(f"\nFATAL ERROR: Could not load a data file. Error: {e}")
     exit()
-
 gen_capacity_scaling = 10
 generators_data = [
-    {"id": "Oil_East", "bus": "Bus1", "Pmin": 0, "Pmax": oil_east_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 20, "Cost_Gen_Quadratic": 0.02},
-    {"id": "Oil_West", "bus": "Bus2", "Pmin": 0, "Pmax": oil_west_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 18, "Cost_Gen_Quadratic": 0.015},
-    {"id": "Oil_Central", "bus": "Bus3", "Pmin": 0, "Pmax": oil_central_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 25, "Cost_Gen_Quadratic": 0.03},
+    {"id": "Oil_East", "bus": "Bus1", "Pmax": oil_east_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 20, "Cost_Gen_Quadratic": 0.02},
+    {"id": "Oil_West", "bus": "Bus2", "Pmax": oil_west_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 18, "Cost_Gen_Quadratic": 0.015},
+    {"id": "Oil_Central", "bus": "Bus3", "Pmax": oil_central_data['Capacity (MW)'] * gen_capacity_scaling, "Cost_Gen_Linear": 25, "Cost_Gen_Quadratic": 0.03},
 ]
-print(f"NOTE: Conventional generator capacities scaled by {gen_capacity_scaling} to ensure feasibility.")
 total_demand_profile = demand_df['Demand (MW)'].iloc[:T_horizon].tolist()
 nodal_demand_fractions = {"Bus1": 0.2, "Bus2": 0.5, "Bus3": 0.3}
 
@@ -149,49 +142,58 @@ def create_opf_model(hourly_demand_at_bus, solar_forecast):
 try:
     solver = pyo.SolverFactory('gurobi')
 except Exception:
-    print("Gurobi not found, falling back to CBC")
+    print("Gurobi not found, falling back to CBC.")
     solver = pyo.SolverFactory('cbc')
 
-# This is for RUNNING ALL EXPERIMENTS
 
+# =============================================================================
+# PART 3: RUNNING ALL EXPERIMENTS
+# =============================================================================
+np.random.seed(42)
 print("\n--- Part 3: Running All Simulation Experiments ---")
-
 def get_hourly_demand_at_bus():
-    """Splits the total demand profile across the three buses."""
     return {bus: [total_demand_profile[t] * nodal_demand_fractions[bus] for t in range(T_horizon)] for bus in nodes_data.keys()}
-
 def run_opf_and_get_results(solar_forecast):
-    """Solves the OPF model and returns the final cost."""
     hourly_demand = get_hourly_demand_at_bus()
     model = create_opf_model(hourly_demand, solar_forecast)
     results = solver.solve(model, tee=False)
     if results.solver.termination_condition != pyo.TerminationCondition.optimal:
-        return {'status': str(results.solver.termination_condition), 'cost': np.nan}
-    return {'status': 'optimal', 'cost': pyo.value(model.TotalCost)}
+        return {'status': str(results.solver.termination_condition), 'cost': np.nan, 'dispatch': None, 'curtailment': None}
+    dispatch = {gen['id']: [pyo.value(model.g[gen['id'], t]) for t in model.T_set] for gen in generators_data}
+    curtailment = [pyo.value(model.p_curtail[t]) for t in model.T_set]
+    return {'status': 'optimal', 'cost': pyo.value(model.TotalCost), 'dispatch': dispatch, 'curtailment': curtailment}
 
-# 3A: Economic Insights (Post-Processing)
-print("\n--- Experiment 3A: Calculating Economic Loss from Accuracy Variations ---")
-perfect_foresight_results = run_opf_and_get_results(true_solar_generation)
-if perfect_foresight_results.get('status') != 'optimal':
-    print(f"FATAL ERROR: Could not solve the perfect foresight case. Status: {perfect_foresight_results.get('status')}")
-    exit()
-PERFECT_COST = perfect_foresight_results['cost']
-print(f"Calculated 'Perfect Foresight' Benchmark Cost: ${PERFECT_COST:,.0f}")
-results_rmse = []
+# --- 3A: Composite Loss Analysis ---
+print("\n--- Experiment 3A: Calculating Composite Loss from Accuracy Variations ---")
+PENALTY_RHO = 5000
+CURTAILMENT_COST_PER_MWH = 20
+results_composite_loss = []
 target_rmses = np.linspace(50, 500, 15)
 for r in target_rmses:
     noise = np.random.normal(loc=0, scale=r, size=T_horizon)
-    noisy_forecast = np.maximum(0, true_solar_generation + noise)
-    res = run_opf_and_get_results(noisy_forecast)
-    if res.get('status') == 'optimal':
-        res['rmse'] = np.sqrt(mean_squared_error(true_solar_generation, noisy_forecast))
-        res['economic_loss'] = res['cost'] - PERFECT_COST
-        results_rmse.append(res)
-df_rmse = pd.DataFrame(results_rmse)
-print("Finished RMSE vs. Economic Loss experiment.")
+    dispatch_forecast = np.maximum(0, true_solar_generation + noise)
+    dispatch_results = run_opf_and_get_results(dispatch_forecast)
+    if dispatch_results.get('status') == 'optimal':
+        demand_t = np.array(total_demand_profile)
+        reserve_t = np.sum([dispatch_results['dispatch'][g['id']] for g in generators_data], axis=0)
+        solar_true_t = true_solar_generation
+        beta_t = (demand_t - reserve_t - solar_true_t < 0).astype(int)
+        planned_solar_usage_t = dispatch_forecast - np.array(dispatch_results['curtailment'])
+        shortfall_amount_t = np.maximum(0, demand_t - reserve_t - solar_true_t)
+        shortfall_loss_t = PENALTY_RHO * (1 - beta_t) * shortfall_amount_t
+        wastage_amount_t = np.maximum(0, planned_solar_usage_t - solar_true_t)
+        curtailment_loss_t = CURTAILMENT_COST_PER_MWH * beta_t * wastage_amount_t
+        total_composite_loss = np.sum(shortfall_loss_t + curtailment_loss_t)
+        results_composite_loss.append({
+            'rmse': np.sqrt(mean_squared_error(true_solar_generation, dispatch_forecast)),
+            'base_cost': dispatch_results['cost'],
+            'composite_loss': total_composite_loss
+        })
+df_composite_loss = pd.DataFrame(results_composite_loss)
+print("Finished composite loss experiment.")
 
-# 3B: Asymmetric Accuracy Objectives (Custom Losses)
-print("\n--- Experiment 3B: Training with Custom Asymmetric Losses ---")
+# --- 3B: Asymmetric Accuracy (Varying rho) ---
+print("\n--- Experiment 3B: Sensitivity Analysis of Asymmetric Penalty (rho) ---")
 def wmse_asymmetric_loss(rho):
     def custom_loss(preds, dtrain):
         labels = dtrain.get_label()
@@ -200,17 +202,16 @@ def wmse_asymmetric_loss(rho):
         hess = np.where(residual >= 0, 2 * rho, 2 * (1 - rho))
         return grad, hess
     return custom_loss
-asymmetric_models_to_test = {
-    "Penalize Under-Forecast (rho=0.2)": 0.2,
-    "Penalize Over-Forecast (rho=0.8)": 0.8
-}
+rho_steps = np.arange(0.75, 1.01, 0.05) 
 results_asymmetric = []
 dtrain = xgb.DMatrix(X_train, label=y_train)
 dtest = xgb.DMatrix(X_test, label=y_test)
 watchlist = [(dtrain, 'train'), (dtest, 'eval')]
 params = {'learning_rate': 0.05, 'max_depth': 5, 'random_state': 42, 'n_jobs': -1}
-for name, rho_value in asymmetric_models_to_test.items():
-    print(f"Training XGBoost model with Custom Loss: {name}...")
+for rho_value in rho_steps:
+    kappa_value = 1 - rho_value
+    name = f"rho={rho_value:.2f}, kappa={kappa_value:.2f}"
+    print(f"Training with Asymmetric Loss: {name}...")
     bst = xgb.train(params=params, dtrain=dtrain, num_boost_round=1000,
                     evals=watchlist, obj=wmse_asymmetric_loss(rho_value),
                     early_stopping_rounds=50, verbose_eval=False)
@@ -220,15 +221,16 @@ for name, rho_value in asymmetric_models_to_test.items():
     if dispatch_results.get('status') == 'optimal':
         results_asymmetric.append({
             'Model Type': name,
+            'rho': rho_value,
             'Cost': dispatch_results['cost'],
             'RMSE': np.sqrt(mean_squared_error(y_test, predictions)),
             'MBE': np.mean(predictions - y_test)
         })
 df_asymmetric = pd.DataFrame(results_asymmetric)
-print("Finished custom loss training experiment.")
+print("Finished varying rho experiment.")
 
-#3C: Standard Loss Comparison (Built-in losses)
-print("\n--- Experiment 3C: Comparing Standard ML Losses (MSE, MAE, etc.) ---")
+# --- 3C: Standard Loss Comparison ---
+print("\n--- Experiment 3C: Comparing Standard ML Losses ---")
 standard_losses_to_test = {
     'Standard MSE (L2)': 'reg:squarederror',
     'Standard MAE (L1)': 'reg:absoluteerror',
@@ -256,79 +258,76 @@ print("Finished standard loss comparison experiment.")
 
 df_all_models = pd.concat([df_asymmetric, df_standard_loss], ignore_index=True)
 
-# NUMERICAL RESULTS FOR REPORT
 
+# =============================================================================
+# PART 3.5: DISPLAYING NUMERICAL RESULTS
+# =============================================================================
 print("\n" + "="*80)
 print("--- FINAL NUMERICAL RESULTS FOR REPORT ---")
 print("="*80)
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_columns', 500)
-pd.set_option('display.width', 1000)
-pd.set_option('display.max_colwidth', None)
-if not df_rmse.empty:
-    print("\n--- Numerical Results for Economic Insights (RMSE Experiment) ---")
-    print(df_rmse[['rmse', 'cost', 'economic_loss']].round(2))
+pd.set_option('display.max_rows', 500); pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000); pd.set_option('display.max_colwidth', None)
+if not df_composite_loss.empty:
+    print("\n--- Numerical Results for Composite Loss (RMSE Experiment) ---")
+    print(df_composite_loss[['rmse', 'base_cost', 'composite_loss']].round(2))
 else:
-    print("\n--- RMSE Experiment did not produce valid results. ---")
+    print("\n--- Composite Loss Experiment did not produce valid results. ---")
 if not df_all_models.empty:
     print("\n--- Numerical Results for Asymmetric & Standard Objectives (Ranked by Cost) ---")
-    print(df_all_models[['Model Type', 'Cost', 'RMSE', 'MBE']].sort_values('Cost').round(2))
+    df_all_models['rho'] = df_all_models['rho'].fillna('N/A') # Fill NaN for standard models
+    print(df_all_models[['Model Type', 'rho', 'Cost', 'RMSE', 'MBE']].sort_values('Cost').round(2))
 else:
     print("\n--- Model Objective experiments did not produce valid results. ---")
 print("\n" + "="*80)
 
 
-
+# =============================================================================
 # PART 4: VISUALIZING ALL RESULTS
-#
+# =============================================================================
 print("\n--- Part 4: Visualizing All Results ---")
 sns.set_style("whitegrid")
 fig, axes = plt.subplots(2, 2, figsize=(22, 16))
 fig.suptitle('Comprehensive Analysis of Forecast Objectives on 3-Bus OPF Economics', fontsize=20)
 
-#  Economic Loss vs. RMSE (from 3A)
+# --- Plot 1: Composite Loss vs. RMSE ---
 ax1 = axes[0, 0]
-if not df_rmse.empty:
-    sns.regplot(x='rmse', y='economic_loss', data=df_rmse, ax=ax1, color='orangered',
-                scatter_kws={'alpha': 0.6, 's': 50}, line_kws={'linestyle':'--'})
-    ax1.set_title('Economic Loss from Forecast Inaccuracy', fontsize=16)
+if not df_composite_loss.empty:
+    sns.regplot(x='rmse', y='composite_loss', data=df_composite_loss, ax=ax1, color='teal', scatter_kws={'alpha': 0.7, 's': 60})
+    ax1.set_title('Composite Loss vs. Forecast Inaccuracy', fontsize=16)
     ax1.set_xlabel('Forecast RMSE (MW)', fontsize=12)
-    ax1.set_ylabel('Economic Loss ($)', fontsize=12)
+    ax1.set_ylabel('Composite Loss ($)', fontsize=12)
     ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax1.axhline(0, color='black', lw=1, linestyle='-')
 
-# Scatter plot of all trained models (from 3B & 3C)
+# --- Plot 2: Bar chart comparing Costs (from 3B & 3C) ---
 ax2 = axes[0, 1]
 if not df_all_models.empty:
-    sns.scatterplot(x='RMSE', y='Cost', data=df_all_models, hue='Model Type', style='Model Type',
-                    s=200, ax=ax2, palette='viridis')
-    ax2.set_title('Performance of Models Trained with Different Objectives', fontsize=16)
-    ax2.set_xlabel('Resulting Forecast RMSE (MW)', fontsize=12)
-    ax2.set_ylabel('Resulting System Cost ($)', fontsize=12)
-    ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
-    ax2.legend(title='Training Objective', bbox_to_anchor=(1.05, 1), loc='upper left')
-
-# chart comparing Costs (from 3B & 3C)
-ax3 = axes[1, 0]
-if not df_all_models.empty:
     df_all_models_sorted = df_all_models.sort_values('Cost')
-    sns.barplot(x='Cost', y='Model Type', data=df_all_models_sorted, ax=ax3, palette='plasma')
-    ax3.set_title('Economic Performance Ranking of Models', fontsize=16)
-    ax3.set_xlabel('Total System Cost ($)', fontsize=12)
-    ax3.set_ylabel('Training Objective', fontsize=12)
-    ax3.get_xaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+    sns.barplot(x='Cost', y='Model Type', data=df_all_models_sorted, ax=ax2, palette='plasma')
+    ax2.set_title('Economic Performance Ranking of Models', fontsize=16)
+    ax2.set_xlabel('Total System Cost ($)', fontsize=12)
+    ax2.set_ylabel('Training Objective', fontsize=12)
+    ax2.get_xaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
 
-# Plot 4: Bar chart comparing Bias (from 3B & 3C)
+# --- Plot 3: System Cost vs. Rho value (from 3B) ---
+ax3 = axes[1, 0]
+if not df_asymmetric.empty:
+    sns.lineplot(x='rho', y='Cost', data=df_asymmetric, ax=ax3, marker='o', color='navy')
+    ax3.set_title('System Cost vs. Asymmetric Penalty (rho)', fontsize=16)
+    ax3.set_xlabel('Rho value (Weight on Over-prediction)', fontsize=12)
+    ax3.set_ylabel('Resulting System Cost ($)', fontsize=12)
+    ax3.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
+
+# --- Plot 4: Bar chart comparing Bias (from 3B & 3C) ---
 ax4 = axes[1, 1]
 if not df_all_models.empty:
     sns.barplot(x='MBE', y='Model Type', data=df_all_models.sort_values('Cost'), ax=ax4, palette='plasma')
     ax4.set_title('Resulting Forecast Bias (MBE) of Models', fontsize=16)
     ax4.set_xlabel('Mean Bias Error (MW)', fontsize=12)
-    ax4.set_ylabel('') # No label to avoid clutter
+    ax4.set_ylabel('')
     ax4.axvline(0, color='black', lw=1, linestyle='--')
 
-plt.subplots_adjust(left=0.08, right=0.8, bottom=0.08, top=0.92, hspace=0.4, wspace=0.3)
-
+plt.tight_layout(rect=[0, 0, 1, 0.96])
 plt.show()
 
 print("\nScript finished successfully.")
