@@ -203,7 +203,7 @@ def wmse_asymmetric_loss(rho):
         return grad, hess
     return custom_loss
 
-# this is the exact sweep what Aswin Sir asked for: rho = 0.75, 0.80, 0.85, 0.90, 0.95, 1.00
+# this is the exact sweep what Aswin Sir asked me for: rho = 0.75, 0.80, 0.85, 0.90, 0.95, 1.00
 rho_steps = np.arange(0.75, 1.01, 0.05) 
 results_asymmetric = []
 dtrain = xgb.DMatrix(X_train, label=y_train)
@@ -326,19 +326,17 @@ if not df_composite_loss.empty:
         scatter_kws={'alpha': 0.9, 's': 150}
     )
 
-    # Increased font size and made bold 
+    # this is what I did increase font size and to make bold harder
     ax1.set_title('Composite Loss vs. Forecast Inaccuracy', fontsize=24, fontweight='bold')
     ax1.set_xlabel('Forecast RMSE (MW)', fontsize=24, fontweight='bold')
     ax1.set_ylabel('Composite Loss ($)', fontsize=24, fontweight='bold')
 
-    #  Increased tick label size for readability 
+    # I increased lable size that you suggested
     ax1.tick_params(axis='both', which='major', labelsize=22)
 
-    # Keep original y-axis formatting and zero line
+    # y-axis formatting and zero line
     ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax1.axhline(0, color='black', lw=1.5, linestyle='-')
-
-    # Apply layout and save the figure
     plt.tight_layout()
     plt.savefig('plot1_composite_loss_large_font.png', dpi=300)
     plt.show()
@@ -359,11 +357,10 @@ data = {
 }
 df_models = pd.DataFrame(data)
 
-# --- 2. Plotting ---
+# 2. Plotting 
 print("Generating Plot with Zoomed Inset and a FULL Detailed Legend...")
 if not df_models.empty:
     
-    # --- Set a clean, bold style to match your image ---
     plt.style.use('default')
     plt.rcParams.update({
         'font.family': 'sans-serif',
@@ -379,12 +376,12 @@ if not df_models.empty:
 
     fig, ax = plt.subplots(figsize=(16, 9))
 
-    # --- Define custom markers and palette ---
+   #markers
     model_markers = ["o", "X", "s", "P", "D", "D", "^", "s", "v"]
     palette = sns.color_palette("viridis", n_colors=len(df_models))
 
-    # --- MAIN PLOT ---
-    # We let Seaborn create the default legend so we can capture its contents
+    # This is MAIN PLOT
+    
     sns.scatterplot(
         x='RMSE', y='Cost', data=df_models,
         hue='Model Type', style='Model Type',
@@ -392,14 +389,11 @@ if not df_models.empty:
         s=600, ax=ax, edgecolor='black', linewidth=2
     )
     
-    # --- THIS IS THE CRITICAL FIX ---
-    # 1. Get the handles and labels from the legend Seaborn just created.
+    # Here what I fix
+    # I got the handles and labels from the legend Seaborn just I created above
     handles, labels = ax.get_legend_handles_labels()
-    # 2. Now, immediately remove the temporary legend that Seaborn placed inside the plot.
+    # Now, immediately remove the temporary legend that Seaborn placed inside the plot.
     ax.get_legend().remove()
-    # ---------------------------------
-    
-    # --- INSET PLOT (The Magnifying Glass) ---
     ax_inset = ax.inset_axes([0.45, 0.4, 0.4, 0.5])
     
     sns.scatterplot(
@@ -421,7 +415,6 @@ if not df_models.empty:
 
     ax.indicate_inset_zoom(ax_inset, edgecolor="black", alpha=1, lw=2.5)
 
-    # --- STYLING THE MAIN PLOT ---
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     
@@ -435,21 +428,16 @@ if not df_models.empty:
     ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{format(int(x), ",")}'))
 
-    # --- CREATE THE FINAL LEGEND YOU WANT ---
-    # --- 5. Customize the Legend ---
     legend = ax.legend(
         title='Training Objective',
-        bbox_to_anchor=(1.02, 1), # Position legend outside the plot area
+        bbox_to_anchor=(1.02, 1), # this is position legend outside the plot area
         loc='upper left',
         borderaxespad=0.,
-        # --- Set legend font sizes ---
         fontsize=20,
         title_fontsize=22
     )
     legend.get_frame().set_linewidth(2.5)
     legend.get_title().set_fontweight('bold')
-
-    # Use tight_layout with a rect parameter to make space for the external legend
     plt.tight_layout(rect=[0, 0, 0.85, 1])
     plt.savefig('performance_plot_final_version.png', dpi=300)
     plt.show()
@@ -468,17 +456,12 @@ if not df_models.empty:
      'Cost': [6000, 5000, 4500, 3500, 4000, 135000, 3000, 2000, 4000]
 }
 df_all_models = pd.DataFrame(data)
-# --------------------------------------------------------------------------
 
-
-# Plot 3: Bar chart comparing Costs with a Log Axis
+# Plot 3: Bar chart comparing Costs with a Log Axis (waht Aswin sir wanted)
 print("Generating Plot 3: Economic Performance Ranking")
 if not df_all_models.empty:
     sns.set_style("whitegrid")
-    
     fig3, ax3 = plt.subplots(figsize=(16, 9))
-    
-    # Sort the dataframe by 'Cost' so the best models (lowest cost) are at the top
     df_all_models_sorted = df_all_models.sort_values('Cost', ascending=True)
     
     sns.barplot(
@@ -488,22 +471,12 @@ if not df_all_models.empty:
         ax=ax3,
         palette='plasma'
     )
-    
-    # --- NEW: Set the x-axis to a logarithmic scale ---
-    # This will help visualize the differences between the low-cost models more clearly.
     ax3.set_xscale('log')
-    
-    # --- MODIFIED: Updated titles and labels to reflect the log scale ---
     ax3.set_title('Economic Performance Ranking of Models', fontsize=24, fontweight='bold')
     ax3.set_xlabel('Total System Cost ($)', fontsize=24, fontweight='bold')
     ax3.set_ylabel('Training Objective', fontsize=24, fontweight='bold')
-    
     ax3.tick_params(axis='both', which='major', labelsize=20)
-
-    # The original currency formatter still works perfectly on a log axis
     ax3.get_xaxis().set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
-    
-    # Ensure layout is tight and save the figure
     plt.tight_layout()
     plt.savefig('plot3_cost_ranking_log_scale.png', dpi=300)
     plt.show()
@@ -523,8 +496,6 @@ if not df_all_models.empty:
     'MBE': [-120, -100, -130, -80, -75, -780, -60, -50, -110]
 }
 df_all_models = pd.DataFrame(data)
-# --------------------------------------------------------------------------
-
 
 #  Plot 4: Bar chart comparing Bias with a Symmetrical Log Axis
 print("Generating Plot 4: Resulting Forecast Bias (Symlog Scale)...")
@@ -543,23 +514,13 @@ if not df_all_models.empty:
         ax=ax4,
         palette='plasma'
     )
-    
-    # --- NEW: Set the x-axis to a symmetrical logarithmic scale ---
-    # This is the correct way to handle log scales with negative values.
-    # 'linthresh' defines the range around zero that remains linear.
     ax4.set_xscale('symlog', linthresh=50)
-    
-    # --- MODIFIED: Updated titles and labels to reflect the new scale ---
     ax4.set_title('Resulting Forecast Bias (MBE) of Models', fontsize=24, fontweight='bold')
     ax4.set_xlabel('Mean Bias Error (MW) [Symlog Scale]', fontsize=24, fontweight='bold')
-    ax4.set_ylabel('') # Keep y-label empty for a clean look
+    ax4.set_ylabel('') #for keep clean y lable
 
     ax4.tick_params(axis='both', which='major', labelsize=20)
-    
-    # Ensure the formatter handles negative numbers correctly
     ax4.get_xaxis().set_major_formatter(FuncFormatter(lambda x, p: format(int(x), ',')))
-
-    # Ensure layout is tight and save the figure
     plt.tight_layout()
     plt.savefig('plot4_bias_comparison_symlog_scale.png', dpi=300)
     plt.show()
@@ -568,8 +529,6 @@ if not df_all_models.empty:
     'Cost': [6000, 5000, 4500, 3500, 4000, 135000]
 }
 df_asymmetric = pd.DataFrame(data)
-# -------------------------------------------------------------
-
 
 # Plot 5: System Cost vs. Rho value with a Log Axis
 print("Generating Plot 5: Rho Sensitivity Analysis (Log Scale)...")
@@ -577,8 +536,7 @@ if not df_asymmetric.empty:
     sns.set_style("whitegrid", {'grid.linestyle': '--'})
 
     fig5, ax5 = plt.subplots(figsize=(16, 9))
-    
-    # Create the line plot with larger markers and a thicker line
+
     sns.lineplot(
         x='rho',
         y='Cost',
@@ -590,21 +548,14 @@ if not df_asymmetric.empty:
         linewidth=3
     )
     
-    # --- NEW: Set the y-axis to a logarithmic scale ---
-    # This will highlight the variations in the lower-cost points.
     ax5.set_yscale('log')
     
-    # --- MODIFIED: Updated titles and labels to reflect the log scale ---
     ax5.set_title('System Cost vs. Asymmetric Penalty (rho)', fontsize=24, fontweight='bold')
     ax5.set_xlabel('Rho value (Weight on Over-prediction)', fontsize=24, fontweight='bold')
     ax5.set_ylabel('Resulting System Cost ($) [Log Scale]', fontsize=24, fontweight='bold')
     
     ax5.tick_params(axis='both', which='major', labelsize=20)
-
-    # The original y-axis formatter works correctly with a log scale
     ax5.get_yaxis().set_major_formatter(FuncFormatter(lambda x, p: f'${format(int(x), ",")}'))
-    
-    # Ensure layout is tight and save the figure
     plt.tight_layout()
     plt.savefig('plot5_rho_sensitivity_log_scale.png', dpi=300)
     plt.show()
